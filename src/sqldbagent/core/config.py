@@ -274,6 +274,42 @@ class AgentCheckpointSettings(BaseModel):
     pipeline: bool = False
 
 
+class AgentMemorySettings(BaseModel):
+    """Agent long-term memory store settings.
+
+    Attributes:
+        backend: Memory-store backend used by LangGraph runtime.store.
+        postgres_url: Optional Postgres connection string for durable memory.
+        auto_setup: Whether Postgres store tables should be initialized automatically.
+        pipeline: Whether the Postgres store should use pipelining when supported.
+        namespace_prefix: Prefix used when building sqldbagent store namespaces.
+        auto_sync_from_snapshot: Whether agents should persist snapshot-derived
+            datasource context into the long-term store automatically.
+        auto_create_snapshot_if_missing: Whether state-seeding should create a
+            snapshot for the active schema when no stored snapshot exists yet.
+        include_in_system_prompt: Whether remembered store context should be
+            merged into the effective system prompt.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    backend: Literal["disabled", "memory", "postgres"] = "memory"
+    postgres_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_POSTGRES_URL",
+            "AGENT_MEMORY_POSTGRES_URL",
+            "LANGGRAPH_STORE_POSTGRES_URL",
+        ),
+    )
+    auto_setup: bool = True
+    pipeline: bool = False
+    namespace_prefix: str = "sqldbagent"
+    auto_sync_from_snapshot: bool = True
+    auto_create_snapshot_if_missing: bool = True
+    include_in_system_prompt: bool = True
+
+
 class AgentSettings(BaseModel):
     """Agent orchestration settings.
 
@@ -290,6 +326,7 @@ class AgentSettings(BaseModel):
         summarization_model: Optional dedicated model identifier for summarization.
         tool_call_digest_limit: Maximum number of compressed tool-call summaries to retain.
         checkpoint: Agent checkpoint persistence settings.
+        memory: Agent long-term memory store settings.
         enable_prompt_enhancements: Whether dynamic prompts should merge saved
             prompt-enhancement artifacts.
     """
@@ -308,6 +345,7 @@ class AgentSettings(BaseModel):
     summarization_model: str | None = None
     tool_call_digest_limit: int = Field(default=10, ge=1)
     checkpoint: AgentCheckpointSettings = Field(default_factory=AgentCheckpointSettings)
+    memory: AgentMemorySettings = Field(default_factory=AgentMemorySettings)
     enable_prompt_enhancements: bool = True
 
 
@@ -657,6 +695,79 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices(
             "SQLDBAGENT_AGENT_CHECKPOINT_PIPELINE",
             "AGENT_CHECKPOINT_PIPELINE",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_backend: Literal["disabled", "memory", "postgres"] | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_BACKEND",
+            "AGENT_MEMORY_BACKEND",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_postgres_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_POSTGRES_URL",
+            "AGENT_MEMORY_POSTGRES_URL",
+            "LANGGRAPH_STORE_POSTGRES_URL",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_auto_setup: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_AUTO_SETUP",
+            "AGENT_MEMORY_AUTO_SETUP",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_pipeline: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_PIPELINE",
+            "AGENT_MEMORY_PIPELINE",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_namespace_prefix: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_NAMESPACE_PREFIX",
+            "AGENT_MEMORY_NAMESPACE_PREFIX",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_auto_sync_from_snapshot: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_AUTO_SYNC_FROM_SNAPSHOT",
+            "AGENT_MEMORY_AUTO_SYNC_FROM_SNAPSHOT",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_auto_create_snapshot_if_missing: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_AUTO_CREATE_SNAPSHOT_IF_MISSING",
+            "AGENT_MEMORY_AUTO_CREATE_SNAPSHOT_IF_MISSING",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    agent_memory_include_in_system_prompt: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_AGENT_MEMORY_INCLUDE_IN_SYSTEM_PROMPT",
+            "AGENT_MEMORY_INCLUDE_IN_SYSTEM_PROMPT",
         ),
         exclude=True,
         repr=False,
@@ -1050,6 +1161,47 @@ class AppSettings(BaseSettings):
                         ),
                     }
                 ),
+                "memory": self.agent.memory.model_copy(
+                    update={
+                        "backend": (
+                            self.agent.memory.backend
+                            if self.agent_memory_backend is None
+                            else self.agent_memory_backend
+                        ),
+                        "postgres_url": self.agent.memory.postgres_url
+                        or self.agent_memory_postgres_url,
+                        "auto_setup": (
+                            self.agent.memory.auto_setup
+                            if self.agent_memory_auto_setup is None
+                            else self.agent_memory_auto_setup
+                        ),
+                        "pipeline": (
+                            self.agent.memory.pipeline
+                            if self.agent_memory_pipeline is None
+                            else self.agent_memory_pipeline
+                        ),
+                        "namespace_prefix": (
+                            self.agent.memory.namespace_prefix
+                            if self.agent_memory_namespace_prefix is None
+                            else self.agent_memory_namespace_prefix
+                        ),
+                        "auto_sync_from_snapshot": (
+                            self.agent.memory.auto_sync_from_snapshot
+                            if self.agent_memory_auto_sync_from_snapshot is None
+                            else self.agent_memory_auto_sync_from_snapshot
+                        ),
+                        "auto_create_snapshot_if_missing": (
+                            self.agent.memory.auto_create_snapshot_if_missing
+                            if self.agent_memory_auto_create_snapshot_if_missing is None
+                            else self.agent_memory_auto_create_snapshot_if_missing
+                        ),
+                        "include_in_system_prompt": (
+                            self.agent.memory.include_in_system_prompt
+                            if self.agent_memory_include_in_system_prompt is None
+                            else self.agent_memory_include_in_system_prompt
+                        ),
+                    }
+                ),
             }
         )
         if self.agent.checkpoint.postgres_url is None and all(
@@ -1072,6 +1224,19 @@ class AppSettings(BaseSettings):
                                 port=self.postgres_port,
                                 database=self.postgres_db,
                             ).render_as_string(hide_password=False),
+                        }
+                    )
+                }
+            )
+        if (
+            self.agent.memory.postgres_url is None
+            and self.agent.checkpoint.postgres_url is not None
+        ):
+            self.agent = self.agent.model_copy(
+                update={
+                    "memory": self.agent.memory.model_copy(
+                        update={
+                            "postgres_url": self.agent.checkpoint.postgres_url,
                         }
                     )
                 }
