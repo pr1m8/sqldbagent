@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from re import sub
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from sqldbagent.core.config import AppSettings, DatasourceSettings
+from sqldbagent.core.enums import Dialect
 from sqldbagent.core.errors import ConfigurationError
 
 
@@ -122,7 +125,12 @@ class EngineManager:
             engine_kwargs["max_overflow"] = datasource.pool.max_overflow
             engine_kwargs["pool_timeout"] = datasource.pool.timeout_seconds
 
-        return create_engine(datasource.url, **engine_kwargs)
+        engine = create_engine(
+            self._apply_url_policy(datasource.url, datasource),
+            **engine_kwargs,
+        )
+        self._apply_connection_policy(engine, datasource)
+        return engine
 
     def create_async_engine(self, datasource_name: str) -> AsyncEngine:
         """Create an async SQLAlchemy engine for a datasource.
@@ -157,7 +165,91 @@ class EngineManager:
             engine_kwargs["max_overflow"] = datasource.pool.max_overflow
             engine_kwargs["pool_timeout"] = datasource.pool.timeout_seconds
 
-        return create_async_engine(async_url, **engine_kwargs)
+        engine = create_async_engine(
+            self._apply_url_policy(async_url, datasource),
+            **engine_kwargs,
+        )
+        self._apply_connection_policy(engine, datasource)
+        return engine
+
+    def _apply_url_policy(self, url: str, datasource: DatasourceSettings) -> str:
+        """Apply dialect-specific connection-string safety policy."""
+
+        if not datasource.safety.read_only or datasource.dialect != Dialect.MSSQL:
+            return url
+
+        parsed = make_url(url)
+        query = dict(parsed.query)
+        normalized_keys = {key: key.replace(" ", "").lower() for key in query}
+
+        if "odbc_connect" in query:
+            odbc_connect = str(query["odbc_connect"])
+            if "applicationintent=" in odbc_connect.lower():
+                query["odbc_connect"] = sub(
+                    r"(?i)ApplicationIntent\s*=\s*[^;]+",
+                    "ApplicationIntent=ReadOnly",
+                    odbc_connect,
+                )
+            else:
+                separator = (
+                    "" if not odbc_connect or odbc_connect.endswith(";") else ";"
+                )
+                query["odbc_connect"] = (
+                    f"{odbc_connect}{separator}ApplicationIntent=ReadOnly"
+                )
+            return parsed.set(query=query).render_as_string(hide_password=False)
+
+        query = {
+            key: value
+            for key, value in query.items()
+            if normalized_keys[key] != "applicationintent"
+        }
+        query["ApplicationIntent"] = "ReadOnly"
+        return parsed.set(query=query).render_as_string(hide_password=False)
+
+    def _apply_connection_policy(
+        self,
+        engine: Engine | AsyncEngine,
+        datasource: DatasourceSettings,
+    ) -> None:
+        """Attach read-only and timeout policies to new engine connections."""
+
+        target = engine.sync_engine if isinstance(engine, AsyncEngine) else engine
+
+        if datasource.dialect == Dialect.SQLITE:
+            if not datasource.safety.read_only:
+                return
+
+            @event.listens_for(target, "connect")
+            def configure_sqlite_read_only(  # noqa: ANN202
+                dbapi_connection: object,
+                connection_record: object,
+            ) -> None:
+                del connection_record
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA query_only = ON")
+                finally:
+                    cursor.close()
+
+            return
+
+        if datasource.dialect == Dialect.POSTGRES:
+
+            @event.listens_for(target, "connect")
+            def configure_postgres_session(  # noqa: ANN202
+                dbapi_connection: object,
+                connection_record: object,
+            ) -> None:
+                del connection_record
+                cursor = dbapi_connection.cursor()
+                try:
+                    if datasource.safety.read_only:
+                        cursor.execute("SET default_transaction_read_only = on")
+                    timeout_ms = int(datasource.safety.statement_timeout_seconds * 1000)
+                    cursor.execute(f"SET statement_timeout = {timeout_ms}")
+                finally:
+                    cursor.close()
 
     def _to_async_url(self, url: str) -> str:
         """Convert a sync URL to the corresponding async URL when needed.
