@@ -379,14 +379,13 @@ class SchemaDiagramService:
         """Normalize a reflected SQL type into a Mermaid-friendly token."""
 
         normalized = "".join(
-            (
-                character
-                if character.isalnum() or character in {"-", "_", "(", ")", "[", "]"}
-                else "_"
-            )
+            (character if character.isalnum() or character in {"_", "-"} else "_")
             for character in data_type
         )
-        normalized = normalized.upper().strip("_") or "TYPE"
+        normalized = normalized.upper().strip("_")
+        while "__" in normalized:
+            normalized = normalized.replace("__", "_")
+        normalized = normalized or "TYPE"
         if not normalized[0].isalpha():
             return f"TYPE_{normalized}"
         return normalized
