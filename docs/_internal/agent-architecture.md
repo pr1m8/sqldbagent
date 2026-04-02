@@ -120,7 +120,7 @@ Implementation decisions:
 
 ## Next Agent Work
 
-The next meaningful agent milestones should be:
+Completed agent milestones:
 
 1. strict sqldbagent agent builder over our own tools
 2. sync and async Postgres checkpoint factories
@@ -128,4 +128,10 @@ The next meaningful agent milestones should be:
 4. state schema and dashboard-oriented state payloads
 5. approval / interrupt strategy for risky tool calls
 6. context summarization and tool-call compression
-7. LangSmith tracing and LangGraph workflow composition once the core agent contract is stable
+7. LangSmith-aware dashboard tracing context and observability status plumbing
+
+Current next agent milestones should be:
+
+1. richer LangGraph workflow composition beyond the single-agent loop
+2. live LangSmith trace validation against real model-backed turns
+3. more dashboard affordances for artifacts, retrieval, and query review

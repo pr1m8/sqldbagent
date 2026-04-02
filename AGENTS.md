@@ -15,10 +15,10 @@ The goal is to keep implementation reusable, testable, and safe for agent-facing
 Use these files in order:
 
 1. [README.md](/Users/will/Projects/sqldbagent/README.md)
-2. [docs/implementation-roadmap.md](/Users/will/Projects/sqldbagent/docs/implementation-roadmap.md)
+2. [docs/\_internal/implementation-roadmap.md](/Users/will/Projects/sqldbagent/docs/_internal/implementation-roadmap.md)
 3. [docs/\_internal/README.md](/Users/will/Projects/sqldbagent/docs/_internal/README.md)
 4. [docs/\_internal/memory.md](/Users/will/Projects/sqldbagent/docs/_internal/memory.md)
-5. [docs/product-goal.md](/Users/will/Projects/sqldbagent/docs/product-goal.md)
+5. [docs/\_internal/product-goal.md](/Users/will/Projects/sqldbagent/docs/_internal/product-goal.md)
 
 If implementation pressure conflicts with the roadmap, fix the roadmap deliberately instead of bypassing it implicitly.
 
@@ -63,6 +63,8 @@ Build in this order unless there is a documented reason not to:
 ## Internal Docs Convention
 
 `docs/_internal/` is for working agreements, bootstrap instructions, setup notes, decision logs, and local integration guidance that supports maintainers and agents.
+
+`docs/source/` is the public documentation surface. Product-facing setup, architecture, CLI, publishing, and API reference material should live there once it is stable enough for contributors and users.
 
 Use it for:
 
@@ -109,10 +111,12 @@ Treat the following as stable repo memory:
 - use `pdm` for project commands
 - use `trunk check --fix` for formatting and linting
 - use conventional commits via Commitizen
+- group commits by coherent feature slices and push after green validation, not as one mixed catch-all commit
 - keep adapter surfaces thin
 - keep database safety constraints central
 - keep retrieval grounded in stored snapshot documents and stable metadata filters
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
+- keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.
 
@@ -132,6 +136,7 @@ Each meaningful feature should leave behind:
 - implementation in the correct layer
 - tests at the right scope
 - doc updates if the workflow or architecture changed
+- a sensible commit boundary once the slice is green
 
 If one of those is missing, the work is incomplete.
 
