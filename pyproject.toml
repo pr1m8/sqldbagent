@@ -84,7 +84,7 @@ typecheck = ["mypy>=1.20.0"]
 mssql = ["pyodbc>=5.3.0", "aioodbc>=0.5.0"]
 tui = ["textual>=8.2.1", "rich>=14.3.3"]
 cli = ["typer>=0.24.1", "rich>=14.3.3"]
-postgres = ["psycopg>=3.3.3"]
+postgres = ["psycopg>=3.3.3", "alembic>=1.18.4"]
 
 [build-system]
 requires = ["pdm-backend"]
