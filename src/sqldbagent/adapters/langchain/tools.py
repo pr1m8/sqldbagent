@@ -219,6 +219,11 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     settings = services.settings
     datasource_name = services.datasource_name
 
+    def _active_schema_name(runtime: Any) -> str | None:
+        state = getattr(runtime, "state", {}) or {}
+        schema_name = state.get("schema_name")
+        return schema_name if isinstance(schema_name, str) and schema_name else None
+
     def list_databases() -> list[str]:
         return services.inspector.list_databases()
 
@@ -557,11 +562,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 getattr(runtime, "store", None),
                 settings=settings,
                 datasource_name=datasource_name,
-                schema_name=(
-                    services.snapshotter.schema_name
-                    if hasattr(services.snapshotter, "schema_name")
-                    else None
-                ),
+                schema_name=_active_schema_name(runtime),
             )
             if record is None:
                 return {
@@ -595,7 +596,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 getattr(runtime, "store", None),
                 settings=settings,
                 datasource_name=datasource_name,
-                schema_name=None,
+                schema_name=_active_schema_name(runtime),
                 notes=notes,
                 prompt_instructions=prompt_instructions,
                 preferred_tables=preferred_tables,
