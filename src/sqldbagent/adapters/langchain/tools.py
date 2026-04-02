@@ -215,6 +215,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     structured_tool = tools_module.StructuredTool
     tool_module = require_dependency("langchain.tools", "langchain")
     tool = tool_module.tool
+    tool_runtime = tool_module.ToolRuntime
     tools: list[Any] = []
     settings = services.settings
     datasource_name = services.datasource_name
@@ -548,7 +549,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     if settings is not None and datasource_name is not None:
 
         @tool(parse_docstring=True)
-        def load_database_memory_tool(runtime: Any) -> dict[str, Any]:
+        def load_database_memory_tool(runtime: tool_runtime) -> dict[str, Any]:
             """Load the remembered datasource/schema context for the active agent.
 
             Args:
@@ -577,7 +578,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             prompt_instructions: str | None = None,
             preferred_tables: list[str] | None = None,
             merge: bool = True,
-            runtime: Any = None,
+            runtime: tool_runtime | None = None,
         ) -> dict[str, Any]:
             """Persist datasource/schema notes for future agent runs.
 
@@ -616,7 +617,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 schema_name: str,
                 create_snapshot_if_missing: bool = True,
                 sample_size: int = 5,
-                runtime: Any = None,
+                runtime: tool_runtime | None = None,
             ) -> dict[str, Any]:
                 """Refresh remembered context from the latest schema snapshot.
 
