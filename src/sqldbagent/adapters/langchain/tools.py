@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,7 @@ from sqldbagent.core.bootstrap import ServiceContainer
 from sqldbagent.prompts.exploration import PromptExplorationService
 
 ToolRuntime = Any
+InjectedToolArg = Any
 
 
 class ListSchemasInput(BaseModel):
@@ -239,6 +240,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
 
     tools_module = require_dependency("langchain_core.tools", "langchain")
     structured_tool = tools_module.StructuredTool
+    globals()["InjectedToolArg"] = tools_module.InjectedToolArg
     tool_module = require_dependency("langchain.tools", "langchain")
     tool = tool_module.tool
     globals()["ToolRuntime"] = tool_module.ToolRuntime
@@ -571,7 +573,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             unique_value_limit: int = 8,
             sync_memory: bool = True,
             create_snapshot_if_missing: bool = True,
-            runtime: ToolRuntime | None = None,
+            runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
         ) -> dict[str, Any]:
             """Run live read-only exploration and save the result into the prompt.
 
@@ -721,7 +723,9 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     if settings is not None and datasource_name is not None:
 
         @tool("get_runtime_context", parse_docstring=True)
-        def get_runtime_context_tool(runtime: ToolRuntime) -> dict[str, Any]:
+        def get_runtime_context_tool(
+            runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        ) -> dict[str, Any]:
             """Return datasource, dialect, schema, and access-policy context.
 
             Args:
@@ -736,7 +740,9 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             )
 
         @tool("load_database_memory", parse_docstring=True)
-        def load_database_memory_tool(runtime: ToolRuntime) -> dict[str, Any]:
+        def load_database_memory_tool(
+            runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
+        ) -> dict[str, Any]:
             """Load the remembered datasource/schema context for the active agent.
 
             Args:
@@ -763,7 +769,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
         @tool("remember_database_context", parse_docstring=True)
         def remember_database_context_tool(
             notes: list[str],
-            runtime: ToolRuntime,
+            runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
             prompt_instructions: str | None = None,
             preferred_tables: list[str] | None = None,
             merge: bool = True,
@@ -804,7 +810,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             @tool("sync_database_memory", parse_docstring=True)
             def sync_database_memory_tool(
                 schema_name: str,
-                runtime: ToolRuntime,
+                runtime: Annotated[ToolRuntime | None, InjectedToolArg] = None,
                 create_snapshot_if_missing: bool = True,
                 sample_size: int = 5,
             ) -> dict[str, Any]:

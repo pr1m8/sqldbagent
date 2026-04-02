@@ -2,6 +2,7 @@
 
 import asyncio
 from importlib.util import find_spec
+from pathlib import Path
 
 import orjson
 from sqlalchemy import create_engine, text
@@ -12,11 +13,26 @@ from sqldbagent.adapters.langchain import (
 )
 from sqldbagent.adapters.mcp import create_mcp_server
 from sqldbagent.core.bootstrap import ServiceContainer
+from sqldbagent.core.config import (
+    AppSettings,
+    ArtifactSettings,
+    DatasourceSettings,
+    ProfilingSettings,
+    SafetySettings,
+)
+from sqldbagent.core.enums import Dialect
 from sqldbagent.core.errors import AdapterDependencyError
-from sqldbagent.core.models.catalog import ColumnModel, TableModel, ViewModel
+from sqldbagent.core.models.catalog import (
+    ColumnModel,
+    SchemaModel,
+    TableModel,
+    ViewModel,
+)
 from sqldbagent.core.models.profile import TableProfileModel
 from sqldbagent.core.models.query import QueryExecutionResult
+from sqldbagent.prompts.models import PromptBundleModel, PromptExplorationModel
 from sqldbagent.safety.models import QueryGuardResult
+from sqldbagent.snapshot.models import SnapshotBundleModel
 
 
 class StubInspectionService:
@@ -118,6 +134,102 @@ class StubQueryService:
         )
 
 
+class StubSnapshotService:
+    """Small test double for snapshot-backed adapter tooling."""
+
+    def load_latest_saved_snapshot(self, schema_name: str) -> SnapshotBundleModel:
+        """Return a fixed snapshot bundle."""
+
+        return SnapshotBundleModel(
+            snapshot_id="snapshot-1",
+            datasource_name="stub",
+            schema_metadata=SchemaModel(
+                database="main",
+                name=schema_name,
+                tables=[
+                    TableModel(
+                        database="main",
+                        schema_name=schema_name,
+                        name="users",
+                        columns=[
+                            ColumnModel(
+                                name="id",
+                                data_type="integer",
+                                nullable=False,
+                            )
+                        ],
+                        primary_key=["id"],
+                    )
+                ],
+                views=[],
+                summary="Stub schema",
+            ),
+            summary="Stub snapshot",
+            regenerate={
+                "datasource_name": "stub",
+                "schema_name": schema_name,
+                "sample_size": 5,
+            },
+        )
+
+    def create_schema_snapshot(
+        self,
+        schema_name: str,
+        sample_size: int = 5,
+    ) -> SnapshotBundleModel:
+        """Return a fixed generated snapshot bundle."""
+
+        del sample_size
+        return self.load_latest_saved_snapshot(schema_name)
+
+    def save_snapshot(self, bundle: SnapshotBundleModel) -> Path:
+        """Return a fixed saved snapshot path."""
+
+        del bundle
+        return Path("var/sqldbagent/snapshots/stub/public/snapshot-1.json")
+
+
+class StubPromptService:
+    """Small test double for prompt-backed adapter tooling."""
+
+    def save_prompt_exploration(
+        self,
+        snapshot: SnapshotBundleModel,
+        exploration: PromptExplorationModel,
+    ) -> dict[str, object]:
+        """Return a small enhancement-like payload."""
+
+        del snapshot
+        return {
+            "schema_name": exploration.schema_name,
+            "summary": exploration.summary,
+        }
+
+    def create_prompt_bundle(
+        self,
+        snapshot: SnapshotBundleModel,
+        enhancement: dict[str, object] | None = None,
+    ) -> PromptBundleModel:
+        """Return a fixed prompt bundle."""
+
+        del enhancement
+        return PromptBundleModel(
+            snapshot_id=snapshot.snapshot_id,
+            datasource_name=snapshot.datasource_name,
+            schema_name=snapshot.schema_name,
+            base_system_prompt="Base prompt",
+            system_prompt="Base prompt\n\nEnhanced prompt",
+            summary="Stub prompt bundle",
+            token_estimates={"system_prompt_tokens": 4},
+        )
+
+    def save_prompt_bundle(self, prompt_bundle: PromptBundleModel) -> Path:
+        """Return a fixed saved prompt path."""
+
+        del prompt_bundle
+        return Path("var/sqldbagent/prompts/stub/public/prompt-1.json")
+
+
 def test_langchain_adapter_raises_clear_dependency_error() -> None:
     """Build tools or raise a clear dependency error."""
 
@@ -205,3 +317,48 @@ def test_langchain_sql_database_can_reflect_sqlite_engine() -> None:
 
     if "users" not in table_info:
         raise AssertionError(table_info)
+
+
+def test_langchain_runtime_tools_hide_runtime_from_json_schema() -> None:
+    """Exclude injected runtime arguments from generated tool schemas."""
+
+    if (
+        find_spec("langchain_core.tools") is None
+        or find_spec("langchain.tools") is None
+    ):
+        return
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="stub",
+                dialect=Dialect.SQLITE,
+                url="sqlite+pysqlite:///:memory:",
+                safety=SafetySettings(),
+            )
+        ],
+        profiling=ProfilingSettings(),
+        artifacts=ArtifactSettings(root_dir="var/sqldbagent-test"),
+    )
+    services = ServiceContainer(
+        inspector=StubInspectionService(),
+        profiler=StubProfilingService(),
+        snapshotter=StubSnapshotService(),
+        prompt_service=StubPromptService(),
+        datasource_name="stub",
+        settings=settings,
+    )
+
+    tool_map = {tool.name: tool for tool in create_langchain_tools(services)}
+    runtime_tool_names = [
+        "explore_and_save_prompt_context",
+        "get_runtime_context",
+        "load_database_memory",
+        "remember_database_context",
+        "sync_database_memory",
+    ]
+
+    for tool_name in runtime_tool_names:
+        tool_args = tool_map[tool_name].args
+        if "runtime" in tool_args:
+            raise AssertionError(f"{tool_name} leaked runtime into tool schema")
