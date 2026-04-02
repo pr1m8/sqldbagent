@@ -218,6 +218,7 @@ def build_snapshot_prompt_context(
         settings=resolved_settings,
         schema_name=schema_name,
     )
+    datasource = resolved_settings.get_datasource(datasource_name)
     if snapshot is None:
         return None
 
@@ -228,6 +229,15 @@ def build_snapshot_prompt_context(
     table_lines = _build_table_highlights(snapshot=snapshot, profiles=profiles_by_table)
     relationship_lines = _build_relationship_highlights(snapshot=snapshot)
     lines = [
+        f"Dialect: {datasource.dialect.value}",
+        (
+            "Default access mode: read_only"
+            + (
+                "; writable execution can be requested explicitly."
+                if datasource.safety.allow_writes
+                else "; writable execution is disabled by datasource policy."
+            )
+        ),
         f"Snapshot ID: {snapshot.snapshot_id}",
         f"Snapshot Summary: {snapshot.summary or 'No snapshot summary available.'}",
         (

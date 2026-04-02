@@ -38,9 +38,11 @@ class ServiceContainer:
         prompt_service: Shared prompt-export service.
         retrieval_service: Shared retrieval service over stored snapshot documents.
         datasource_name: Canonical datasource name backing the container.
-        settings: Application settings that built the container.
+    settings: Application settings that built the container.
         engine: Optional SQLAlchemy engine owned by the container.
         async_engine: Optional async SQLAlchemy engine owned by the container.
+        write_engine: Optional writable sync engine owned by the container.
+        write_async_engine: Optional writable async engine owned by the container.
     """
 
     inspector: InspectionService
@@ -56,6 +58,8 @@ class ServiceContainer:
     settings: AppSettings | None = None
     engine: Engine | None = None
     async_engine: AsyncEngine | None = None
+    write_engine: Engine | None = None
+    write_async_engine: AsyncEngine | None = None
 
     def close(self) -> None:
         """Dispose owned sync resources.
@@ -66,14 +70,20 @@ class ServiceContainer:
 
         if self.engine is not None:
             self.engine.dispose()
+        if self.write_engine is not None:
+            self.write_engine.dispose()
 
     async def aclose(self) -> None:
         """Dispose owned async resources."""
 
         if self.async_engine is not None:
             await self.async_engine.dispose()
+        if self.write_async_engine is not None:
+            await self.write_async_engine.dispose()
         if self.engine is not None:
             self.engine.dispose()
+        if self.write_engine is not None:
+            self.write_engine.dispose()
 
 
 def build_service_container(
@@ -104,6 +114,19 @@ def build_service_container(
     async_engine = None
     if include_async_engine:
         async_engine = engine_manager.create_async_engine(canonical_datasource_name)
+    write_engine = None
+    write_async_engine = None
+    if datasource.safety.allow_writes:
+        writable_datasource = datasource.model_copy(
+            update={"safety": datasource.safety.model_copy(update={"read_only": False})}
+        )
+        write_engine = engine_manager.create_sync_engine_from_settings(
+            writable_datasource
+        )
+        if include_async_engine:
+            write_async_engine = engine_manager.create_async_engine_from_settings(
+                writable_datasource
+            )
     inspector = SQLAlchemyInspectionService(engine)
     profiler = SQLAlchemyProfilingService(
         engine=engine,
@@ -117,6 +140,8 @@ def build_service_container(
         engine=engine,
         guard=query_guard,
         async_engine=async_engine,
+        write_engine=write_engine,
+        write_async_engine=write_async_engine,
     )
     snapshotter = SnapshotService(
         datasource_name=canonical_datasource_name,
@@ -161,4 +186,6 @@ def build_service_container(
         settings=resolved_settings,
         engine=engine,
         async_engine=async_engine,
+        write_engine=write_engine,
+        write_async_engine=write_async_engine,
     )

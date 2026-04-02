@@ -41,6 +41,8 @@ class SafetySettings(BaseModel):
 
     Attributes:
         read_only: Whether execution paths should default to read-only behavior.
+        allow_writes: Whether writable execution may be requested explicitly on
+            top of the read-only default.
         statement_timeout_seconds: Default execution timeout.
         max_rows: Default maximum row count for user-facing query surfaces.
         allowed_schemas: Optional schema allowlist enforced by higher layers.
@@ -49,6 +51,7 @@ class SafetySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     read_only: bool = True
+    allow_writes: bool = False
     statement_timeout_seconds: float = Field(default=30.0, gt=0)
     max_rows: int = Field(default=500, ge=1)
     allowed_schemas: list[str] = Field(default_factory=list)
