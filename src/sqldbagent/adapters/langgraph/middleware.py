@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqldbagent.adapters.langgraph.memory import (
+    load_database_memory,
+    render_database_memory_prompt_context,
+    sync_database_memory_from_snapshot,
+)
 from sqldbagent.adapters.langgraph.prompts import create_sqldbagent_system_prompt
 from sqldbagent.adapters.langgraph.state import SQLDBAgentState
 from sqldbagent.adapters.shared import require_dependency
-from sqldbagent.core.agent_context import build_sqldbagent_state_seed
+from sqldbagent.core.agent_context import (
+    build_sqldbagent_state_seed,
+    load_latest_snapshot_bundle,
+)
+from sqldbagent.core.bootstrap import ServiceContainer
 from sqldbagent.core.config import AppSettings, load_settings
 
 
@@ -16,6 +25,7 @@ def create_sqldbagent_middleware(
     datasource_name: str,
     settings: AppSettings | None = None,
     schema_name: str | None = None,
+    services: ServiceContainer | None = None,
 ) -> list[Any]:
     """Build the default middleware stack for sqldbagent agents.
 
@@ -42,6 +52,7 @@ def create_sqldbagent_middleware(
             datasource_name=datasource_name,
             settings=resolved_settings,
             schema_name=schema_name,
+            services=services,
         ),
         create_sqldbagent_dynamic_prompt_middleware(
             datasource_name=datasource_name,
@@ -103,6 +114,7 @@ def create_sqldbagent_state_middleware(
     datasource_name: str,
     settings: AppSettings | None = None,
     schema_name: str | None = None,
+    services: ServiceContainer | None = None,
 ) -> Any:
     """Seed agent state with snapshot and dashboard-oriented context.
 
@@ -110,6 +122,7 @@ def create_sqldbagent_state_middleware(
         datasource_name: Datasource identifier.
         settings: Optional application settings.
         schema_name: Optional schema focus.
+        services: Optional shared services for first-run snapshot bootstrap.
 
     Returns:
         Any: LangChain middleware instance created via `@before_agent`.
@@ -119,12 +132,39 @@ def create_sqldbagent_state_middleware(
     middleware_module = require_dependency("langchain.agents.middleware", "langchain")
 
     @middleware_module.before_agent(state_schema=SQLDBAgentState)
-    def sqldbagent_state_seed(_state: SQLDBAgentState, _runtime: Any) -> dict[str, Any]:
-        return build_sqldbagent_state_seed(
+    def sqldbagent_state_seed(state: SQLDBAgentState, runtime: Any) -> dict[str, Any]:
+        _ensure_database_memory_context(
+            services=services,
+            runtime=runtime,
             datasource_name=datasource_name,
             settings=resolved_settings,
             schema_name=schema_name,
         )
+        seed = build_sqldbagent_state_seed(
+            datasource_name=datasource_name,
+            settings=resolved_settings,
+            schema_name=schema_name,
+        )
+        memory_record = load_database_memory(
+            getattr(runtime, "store", None),
+            settings=resolved_settings,
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+        )
+        if memory_record is not None:
+            seed["remembered_context_active"] = True
+            seed["remembered_context_summary"] = memory_record.summary
+            dashboard_payload = dict(seed.get("dashboard_payload") or {})
+            notes = list(dashboard_payload.get("notes") or [])
+            if memory_record.summary:
+                notes.append(f"Remembered context: {memory_record.summary}")
+            dashboard_payload["notes"] = notes
+            seed["dashboard_payload"] = dashboard_payload
+        else:
+            seed["remembered_context_active"] = False
+            seed["remembered_context_summary"] = None
+        del state
+        return seed
 
     return sqldbagent_state_seed
 
@@ -150,14 +190,81 @@ def create_sqldbagent_dynamic_prompt_middleware(
     middleware_module = require_dependency("langchain.agents.middleware", "langchain")
 
     @middleware_module.dynamic_prompt
-    def sqldbagent_dynamic_prompt(_request: Any) -> str:
+    def sqldbagent_dynamic_prompt(request: Any) -> str:
+        remembered_context = None
+        if resolved_settings.agent.memory.include_in_system_prompt:
+            remembered_context = render_database_memory_prompt_context(
+                load_database_memory(
+                    getattr(request.runtime, "store", None),
+                    settings=resolved_settings,
+                    datasource_name=datasource_name,
+                    schema_name=schema_name,
+                )
+            )
         return create_sqldbagent_system_prompt(
             datasource_name=datasource_name,
             settings=resolved_settings,
             schema_name=schema_name,
+            remembered_context=remembered_context,
         )
 
     return sqldbagent_dynamic_prompt
+
+
+def _ensure_database_memory_context(
+    *,
+    services: ServiceContainer | None,
+    runtime: Any,
+    datasource_name: str,
+    settings: AppSettings,
+    schema_name: str | None,
+) -> None:
+    """Ensure store-backed database context exists for the active agent scope.
+
+    Args:
+        services: Optional shared service container for snapshot bootstrap.
+        runtime: LangGraph runtime object exposed to middleware.
+        datasource_name: Canonical datasource name.
+        settings: Application settings.
+        schema_name: Optional schema focus.
+    """
+
+    if (
+        services is None
+        or services.snapshotter is None
+        or settings.agent.memory.backend == "disabled"
+        or not settings.agent.memory.auto_sync_from_snapshot
+    ):
+        return
+    store = getattr(runtime, "store", None)
+    if store is None:
+        return
+
+    snapshot = load_latest_snapshot_bundle(
+        datasource_name=datasource_name,
+        settings=settings,
+        schema_name=schema_name,
+    )
+
+    if (
+        snapshot is None
+        and schema_name is not None
+        and settings.agent.memory.auto_create_snapshot_if_missing
+    ):
+        snapshot = services.snapshotter.create_schema_snapshot(
+            schema_name=schema_name,
+            sample_size=settings.profiling.default_sample_size,
+        )
+        services.snapshotter.save_snapshot(snapshot)
+
+    if snapshot is not None:
+        sync_database_memory_from_snapshot(
+            store,
+            settings=settings,
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+            snapshot=snapshot,
+        )
 
 
 def create_sqldbagent_tool_error_middleware() -> Any:
