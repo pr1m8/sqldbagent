@@ -57,6 +57,7 @@ Current bootstrap surface includes:
 - LangChain, LangGraph, and FastMCP adapter factories
 - LangGraph agent builders with memory or Postgres-backed checkpointing
 - LangChain v1 middleware for dynamic prompting, todo tracking, tool handling, state seeding, and optional HITL / summarization
+- Streamlit dashboard chat surface backed by persisted LangGraph thread IDs
 - CLI commands:
   - `sqldbagent config validate`
   - `sqldbagent inspect server`
@@ -78,6 +79,7 @@ Current bootstrap surface includes:
   - `sqldbagent diagram from-snapshot`
   - `sqldbagent docs export`
   - `sqldbagent docs export-from-snapshot`
+  - `sqldbagent dashboard serve`
   - `sqldbagent prompt export`
   - `sqldbagent prompt export-from-snapshot`
   - `sqldbagent rag index`
@@ -115,6 +117,10 @@ LangGraph config.
 
 FastMCP serving is also settings-driven now. `sqldbagent mcp serve` defaults to the
 transport and host/port/path values in `.env`, with CLI flags available for overrides.
+
+The first dashboard surface is a chat-style Streamlit app backed by the same
+LangGraph agent stack. Reuse a `thread_id` in the dashboard to continue the same
+conversation through the configured checkpointer.
 
 Datasource aliases can be provided with `SQLDBAGENT_DATASOURCE_ALIASES` as JSON,
 for example `{"demo":"postgres_demo","pg":"postgres"}`. This keeps CLI and

@@ -70,6 +70,7 @@ Repo decisions:
 - prompts should be large, descriptive, and grounded in stored snapshot context
 - prompt exports should be durable artifacts with JSON and Markdown forms so operators can review and reuse them outside a live agent run
 - state should be dashboard-friendly and reusable for future UI surfaces
+- the first chat UI should stay Python-first and thin, using Streamlit over the persisted LangGraph agent instead of a separate frontend stack
 - tool-call digests should retain high-signal results without preserving every raw tool payload forever
 - summarization should trigger around 90% of context when enabled
 - HITL should be aimed first at `safe_query_sql`, not inspection tools

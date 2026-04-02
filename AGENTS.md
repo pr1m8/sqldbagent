@@ -145,6 +145,7 @@ Use these repo entrypoints by default:
 - `make logs-postgres` or `make logs-mssql` for service logs
 - `make logs-qdrant` for retrieval service logs
 - `make langgraph-dev` for local LangGraph CLI runs
+- `make dashboard-demo` to run the persisted demo chat dashboard
 - `make mcp-stdio` or `make mcp-http` to expose the local FastMCP server
 
 Live integration and E2E work should load settings from `.env` through the repo

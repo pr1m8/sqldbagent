@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqldbagent.cli._typer import load_typer
 from sqldbagent.cli.config import app as config_app
+from sqldbagent.cli.dashboard import app as dashboard_app
 from sqldbagent.cli.diagram import app as diagram_app
 from sqldbagent.cli.docs import app as docs_app
 from sqldbagent.cli.inspect import app as inspect_app
@@ -17,6 +18,7 @@ from sqldbagent.cli.snapshot import app as snapshot_app
 typer = load_typer()
 app = typer.Typer(help="sqldbagent command line interface.")
 app.add_typer(config_app, name="config")
+app.add_typer(dashboard_app, name="dashboard")
 app.add_typer(diagram_app, name="diagram")
 app.add_typer(docs_app, name="docs")
 app.add_typer(inspect_app, name="inspect")

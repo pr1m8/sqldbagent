@@ -26,6 +26,7 @@ Stable repo memory should capture:
 - local Postgres is the standard agent checkpoint target when persistence is enabled, but it should be treated as separate persistence infrastructure from inspected target databases
 - agent middleware should own dynamic prompting, state seeding, todo handling, tool-error shaping, HITL, and summarization policy
 - FastMCP serving should be settings-driven through `.env` with CLI overrides, not hard-coded transport choices
+- the first chat UI surface is the Streamlit dashboard over persisted LangGraph thread IDs, not a separate frontend app
 - live integration and E2E tests should load datasource config from `.env`, not rely only on raw exported shell variables
 - `langgraph.json` should rely on the local project `pyproject.toml` for dependencies instead of duplicating package names
 
