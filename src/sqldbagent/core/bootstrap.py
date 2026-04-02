@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.config import AppSettings, load_settings
 from sqldbagent.core.errors import AdapterDependencyError
+from sqldbagent.diagrams.service import SchemaDiagramService
 from sqldbagent.docs.service import SnapshotDocumentService
 from sqldbagent.engines.factory import DatasourceRegistry, EngineManager
 from sqldbagent.introspect.base import InspectionService
@@ -31,6 +32,7 @@ class ServiceContainer:
         query_guard: Shared SQL safety service.
         query_service: Shared guarded query execution service.
         snapshotter: Shared snapshot persistence service.
+        diagram_service: Shared schema diagram export service.
         document_service: Shared snapshot document-export service.
         retrieval_service: Shared retrieval service over stored snapshot documents.
         engine: Optional SQLAlchemy engine owned by the container.
@@ -42,16 +44,19 @@ class ServiceContainer:
     query_guard: QueryGuardService | None = None
     query_service: SafeQueryService | None = None
     snapshotter: SnapshotService | None = None
+    diagram_service: SchemaDiagramService | None = None
     document_service: SnapshotDocumentService | None = None
     retrieval_service: SnapshotRetrievalService | None = None
     engine: Engine | None = None
     async_engine: AsyncEngine | None = None
 
     def close(self) -> None:
-        """Dispose owned resources."""
+        """Dispose owned sync resources.
 
-        if self.async_engine is not None:
-            self.async_engine.sync_engine.dispose()
+        When an async engine is present, callers should prefer `aclose()` so the
+        async SQLAlchemy engine can shut down cleanly.
+        """
+
         if self.engine is not None:
             self.engine.dispose()
 
@@ -112,6 +117,7 @@ def build_service_container(
         profiler=profiler,
         artifacts=resolved_settings.artifacts,
     )
+    diagram_service = SchemaDiagramService(artifacts=resolved_settings.artifacts)
     document_service = SnapshotDocumentService(artifacts=resolved_settings.artifacts)
     try:
         require_dependency("langchain_qdrant", "langchain-qdrant")
@@ -136,6 +142,7 @@ def build_service_container(
         query_guard=query_guard,
         query_service=query_service,
         snapshotter=snapshotter,
+        diagram_service=diagram_service,
         document_service=document_service,
         retrieval_service=retrieval_service,
         engine=engine,
