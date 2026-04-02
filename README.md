@@ -1,15 +1,22 @@
 # sqldbagent
 
 [![CI](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml)
+[![Publish](https://github.com/pr1m8/sqldbagent/actions/workflows/publish.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/publish.yml)
 [![PyPI](https://img.shields.io/pypi/v/sqldbagent.svg)](https://pypi.org/project/sqldbagent/)
+[![Downloads](https://img.shields.io/pypi/dm/sqldbagent.svg)](https://pypi.org/project/sqldbagent/)
 [![Docs](https://readthedocs.org/projects/sqldbagent/badge/?version=latest)](https://sqldbagent.readthedocs.io/en/latest/)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-0f766e.svg)](https://www.python.org/downloads/)
 [![PDM](https://img.shields.io/badge/deps-pdm-334155.svg)](https://pdm-project.org/)
+[![LangGraph](https://img.shields.io/badge/agent-LangGraph-1f6feb.svg)](https://langchain-ai.github.io/langgraph/)
+[![Qdrant](https://img.shields.io/badge/vectorstore-Qdrant-c2410c.svg)](https://qdrant.tech/)
+[![SQL Policy](https://img.shields.io/badge/sql-default%20read--only-0f766e.svg)](https://sqldbagent.readthedocs.io/en/latest/configuration.html#query-safety-defaults)
 [![License: MIT](https://img.shields.io/badge/license-MIT-115e59.svg)](LICENSE)
 
 Safe database intelligence for agents, operators, and automation.
 
 sqldbagent is a service-first platform for understanding relational databases through normalized metadata, durable artifacts, guarded querying, and agent-ready surfaces. It starts with Postgres and MSSQL, uses SQLite as a lightweight smoke/E2E target, and keeps the shared service layer authoritative across every interface.
+
+Quick links: [Documentation](https://sqldbagent.readthedocs.io/en/latest/) · [Getting Started](https://sqldbagent.readthedocs.io/en/latest/getting-started.html) · [PyPI](https://pypi.org/project/sqldbagent/) · [Issues](https://github.com/pr1m8/sqldbagent/issues)
 
 ## Why This Exists
 
@@ -24,6 +31,15 @@ sqldbagent is trying to sit in the middle:
 - store snapshots, profiles, docs, diagrams, prompts, and retrieval indexes durably
 - let CLI workflows, dashboards, MCP tools, and LangGraph agents reuse that context
 - keep all agent-facing SQL behind an explicit read-only safety layer
+
+## Highlights
+
+- one shared service layer across CLI, dashboard, FastMCP, LangChain, and LangGraph
+- durable per-datasource and per-schema artifacts for snapshots, docs, diagrams, prompts, and retrieval indexes
+- guarded sync and async SQL with read-only defaults and explicit writable opt-in only when datasource policy allows it
+- Qdrant-backed retrieval over stored snapshot documents instead of ad hoc schema text blobs
+- prompt-enhancement artifacts that can merge generated schema context, user notes, live explored context, and remembered long-term context
+- a Streamlit dashboard that uses the same persisted agent stack, not a separate one-off frontend path
 
 ## Core Shape
 
@@ -53,6 +69,21 @@ That means:
 - FastMCP server surface
 - Streamlit dashboard chat surface with chat, schema diagram, prompt review, retrieval management, query execution, token budgets, and saved-thread reuse over the same persisted agent stack
 - streamed dashboard turn progress, optional thread naming, and first-run annotation capture for new datasource/schema contexts
+
+## Advanced Methods
+
+sqldbagent is not just wiring together a SQL client and a chatbot. The current stack uses a few higher-value methods to keep context durable, safe, and reviewable:
+
+- normalized metadata first: live introspection is converted into shared contracts before downstream tools, exports, or agent surfaces use it
+- artifact-first context reuse: snapshots, diagrams, markdown docs, prompt bundles, and retrieval manifests are persisted so later runs can reload context instead of rediscovering it
+- schema-aware prompt enhancement: prompts are generated from stored snapshots, then layered with saved user context, direct effective-prompt instructions, and optional live exploration
+- prompt token budgeting: prompt bundles and enhancements cache token estimates with `tiktoken` when available and a deterministic fallback otherwise
+- live prompt exploration: read-only profiling can harvest high-signal categorical values, join paths, and index hints and save them back into the prompt artifact
+- guarded SQL as a hard boundary: the SQL guard stays authoritative even when connection-level read-only policy is available for Postgres, SQLite, or MSSQL
+- retrieval over stored schema documents: Qdrant indexes snapshot-derived documents, with embeddings cached under the artifact root for reuse
+- LangGraph checkpoint plus store memory: thread state is persisted through LangGraph checkpoints, and long-term datasource/schema memory can be stored separately and reinjected into the dynamic prompt
+- shared runtime context: LangChain and LangGraph tools receive explicit dialect, access-mode, timeout, async-capability, and schema-policy context instead of guessing
+- UI resilience: the dashboard can fall back to generated schema images when Mermaid rendering is unreliable and can resolve the active snapshot from stored artifacts even when thread state is sparse
 
 ## Install
 
@@ -84,9 +115,13 @@ pdm run sqldbagent inspect tables postgres_demo --schema public
 pdm run sqldbagent snapshot create postgres_demo public
 pdm run sqldbagent profile unique-values postgres_demo customers segment --schema public
 pdm run sqldbagent prompt export postgres_demo public
+make demo-rag-index
+make demo-rag-query
 make langgraph-dev-demo
 make dashboard-demo
 ```
+
+That local stack includes Qdrant, so retrieval and vector-backed schema context can be exercised end to end with the same persisted snapshot artifacts the agent stack uses.
 
 The dashboard includes:
 
@@ -156,6 +191,14 @@ make test
 make test-integration
 make test-e2e
 ```
+
+Useful local surfaces:
+
+- `make dashboard-demo` for the persisted demo chat dashboard
+- `make langgraph-dev-demo` for the LangGraph API against the demo datasource
+- `make mcp-stdio` or `make mcp-http` for the FastMCP server
+- `make demo-rag-index` and `make demo-rag-query` for the Qdrant retrieval flow
+- `make logs-qdrant` for retrieval service logs
 
 ## Publishing
 
