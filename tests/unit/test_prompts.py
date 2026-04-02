@@ -90,10 +90,18 @@ def test_prompt_service_persists_bundle_and_markdown(tmp_path: Path) -> None:
         raise AssertionError(loaded_bundle.state_seed)
     if loaded_bundle.token_estimates.get("system_prompt_tokens", 0) <= 0:
         raise AssertionError(loaded_bundle.token_estimates)
+    if loaded_bundle.token_estimates.get("base_system_prompt_tokens", 0) <= 0:
+        raise AssertionError(loaded_bundle.token_estimates)
+    if "enhancement_text_tokens" not in loaded_bundle.token_estimates:
+        raise AssertionError(loaded_bundle.token_estimates)
     markdown_text = markdown_path.read_text(encoding="utf-8")
     if "## System Prompt" not in markdown_text:
         raise AssertionError(markdown_text)
     if "## Base System Prompt" not in markdown_text:
+        raise AssertionError(markdown_text)
+    if "## Token Budget" not in markdown_text:
+        raise AssertionError(markdown_text)
+    if "## Token Estimates JSON" not in markdown_text:
         raise AssertionError(markdown_text)
     if "users" not in markdown_text:
         raise AssertionError(markdown_text)
@@ -219,6 +227,21 @@ def test_prompt_service_updates_prompt_enhancement_context(tmp_path: Path) -> No
         prompt_bundle.enhancement.token_estimates.get("generated_context_tokens", 0)
         <= 0
     ):
+        raise AssertionError(prompt_bundle.enhancement.token_estimates)
+    if prompt_bundle.enhancement.token_estimates.get("user_context_tokens", 0) <= 0:
+        raise AssertionError(prompt_bundle.enhancement.token_estimates)
+    if (
+        prompt_bundle.enhancement.token_estimates.get(
+            "additional_effective_context_tokens",
+            0,
+        )
+        <= 0
+    ):
+        raise AssertionError(prompt_bundle.enhancement.token_estimates)
+    if prompt_bundle.enhancement.token_estimates.get(
+        "effective_enhancement_tokens",
+        0,
+    ) <= prompt_bundle.enhancement.token_estimates.get("generated_context_tokens", 0):
         raise AssertionError(prompt_bundle.enhancement.token_estimates)
     if "Schema shape:" not in prompt_bundle.enhancement.generated_context:
         raise AssertionError(prompt_bundle.enhancement.generated_context)
@@ -349,3 +372,5 @@ def test_prompt_service_saves_live_exploration_into_effective_prompt(
         <= 0
     ):
         raise AssertionError(prompt_bundle.enhancement.token_estimates)
+    if prompt_bundle.token_estimates.get("enhancement_text_tokens", 0) <= 0:
+        raise AssertionError(prompt_bundle.token_estimates)
