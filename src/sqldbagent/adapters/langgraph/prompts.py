@@ -19,6 +19,7 @@ def create_sqldbagent_base_system_prompt(
     datasource_name: str,
     settings: AppSettings | None = None,
     schema_name: str | None = None,
+    remembered_context: str | None = None,
 ) -> str:
     """Build the base sqldbagent system prompt before enhancement layers.
 
@@ -26,6 +27,8 @@ def create_sqldbagent_base_system_prompt(
         datasource_name: Datasource identifier.
         settings: Optional application settings.
         schema_name: Optional schema focus.
+        remembered_context: Optional remembered database context loaded from the
+            long-term memory store.
 
     Returns:
         str: Base system prompt text for LangChain and LangGraph agents.
@@ -64,6 +67,8 @@ def create_sqldbagent_base_system_prompt(
     ]
     if snapshot_context:
         prompt_parts.append(f"STORED SNAPSHOT CONTEXT:\n{snapshot_context}")
+    if remembered_context:
+        prompt_parts.append(f"REMEMBERED DATABASE CONTEXT:\n{remembered_context}")
     return "\n".join(prompt_parts)
 
 
@@ -73,6 +78,7 @@ def create_sqldbagent_system_prompt(
     settings: AppSettings | None = None,
     schema_name: str | None = None,
     enhancement: PromptEnhancementModel | None = None,
+    remembered_context: str | None = None,
 ) -> str:
     """Build the default sqldbagent system prompt.
 
@@ -81,6 +87,8 @@ def create_sqldbagent_system_prompt(
         settings: Optional application settings.
         schema_name: Optional schema focus.
         enhancement: Optional preloaded prompt enhancement.
+        remembered_context: Optional remembered database context loaded from the
+            long-term memory store.
 
     Returns:
         str: System prompt text for LangChain and LangGraph agents.
@@ -91,6 +99,7 @@ def create_sqldbagent_system_prompt(
         datasource_name=datasource_name,
         settings=resolved_settings,
         schema_name=schema_name,
+        remembered_context=remembered_context,
     )
     if not resolved_settings.agent.enable_prompt_enhancements:
         return base_prompt
