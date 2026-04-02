@@ -35,17 +35,17 @@ def _resolve_dashboard_checkpointer(
     return checkpointer
 
 
-def _build_checkpoint_status(settings: AppSettings) -> str:
+def _build_checkpoint_status(observability: dict[str, object]) -> str:
     """Build sidebar copy describing the active checkpoint mode.
 
     Args:
-        settings: Application settings.
+        observability: Session observability payload.
 
     Returns:
         str: Human-readable checkpoint description for the dashboard sidebar.
     """
 
-    if settings.agent.checkpoint.backend == "postgres":
+    if observability.get("checkpoint_backend") == "postgres":
         return "Persistence is enabled through the configured Postgres checkpointer."
     return "Persistence is scoped to this Streamlit session via an in-memory saver."
 
@@ -109,27 +109,44 @@ def main() -> None:
         st.session_state.dashboard_datasource = datasource_name
         st.session_state.dashboard_schema = schema_name
         st.session_state.dashboard_thread_id = thread_id
-        st.divider()
-        st.write(
-            f"Checkpoint backend: `{settings.agent.checkpoint.backend}`",
-        )
-        st.write(_build_checkpoint_status(settings))
 
     session = service.load_thread(
         thread_id=thread_id,
         datasource_name=datasource_name,
         schema_name=schema_name or None,
     )
+    observability = session.observability
+    summary_cards = session.dashboard_payload.get("cards", [])
 
     with st.sidebar:
-        cards = session.dashboard_payload.get("cards", [])
-        if cards:
+        if summary_cards:
             st.subheader("Context")
-            for card in cards:
+            for card in summary_cards:
                 st.metric(
                     label=str(card.get("title", "Value")),
                     value=str(card.get("value", "")),
                 )
+        st.subheader("Observability")
+        st.write(
+            f"Checkpoint backend: `{observability.get('checkpoint_backend', 'unknown')}`",
+        )
+        st.write(_build_checkpoint_status(observability))
+        if observability.get("langsmith_tracing"):
+            st.success("LangSmith tracing is enabled for dashboard turns.")
+        else:
+            st.info("LangSmith tracing is currently disabled.")
+        langsmith_project = observability.get("langsmith_project")
+        if langsmith_project:
+            st.write(f"Project: `{langsmith_project}`")
+        langsmith_endpoint = observability.get("langsmith_endpoint")
+        if langsmith_endpoint:
+            st.write(f"Endpoint: `{langsmith_endpoint}`")
+        langsmith_workspace_id = observability.get("langsmith_workspace_id")
+        if langsmith_workspace_id:
+            st.write(f"Workspace: `{langsmith_workspace_id}`")
+        langsmith_tags = observability.get("langsmith_tags") or []
+        if langsmith_tags:
+            st.write("Tags: " + ", ".join(str(tag) for tag in langsmith_tags))
         if session.latest_snapshot_summary:
             with st.expander("Latest Snapshot", expanded=False):
                 st.write(session.latest_snapshot_summary)
@@ -137,6 +154,16 @@ def main() -> None:
             with st.expander("Tool Digest", expanded=False):
                 for line in session.tool_call_digest:
                     st.write(f"- {line}")
+
+    if summary_cards:
+        visible_cards = summary_cards[:4]
+        columns = st.columns(len(visible_cards))
+        for column, card in zip(columns, visible_cards, strict=False):
+            with column:
+                st.metric(
+                    label=str(card.get("title", "Value")),
+                    value=str(card.get("value", "")),
+                )
 
     for message in session.messages:
         if message.role == "user":

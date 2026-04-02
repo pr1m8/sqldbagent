@@ -107,3 +107,35 @@ def test_dashboard_chat_service_renders_tool_call_placeholder() -> None:
 
     if session.messages[0].content != "Calling tools: list_tables":
         raise AssertionError(session.messages)
+
+
+def test_dashboard_chat_service_surfaces_observability_settings() -> None:
+    """Expose checkpoint and LangSmith status for dashboard rendering."""
+
+    settings = AppSettings(
+        datasources=[],
+        agent=AgentSettings(
+            checkpoint=AgentCheckpointSettings(backend="postgres"),
+        ),
+        langsmith={
+            "tracing": True,
+            "project": "sqldbagent-dev",
+            "api_key": "langsmith-test-key",
+            "tags": ["sqldbagent", "dashboard"],
+        },
+    )
+    service = DashboardChatService(settings=settings)
+    session = service._session_from_values(  # noqa: SLF001
+        thread_id="thread-3",
+        datasource_name="postgres_demo",
+        schema_name="public",
+        values={"messages": []},
+    )
+
+    observability = session.observability
+    if observability.get("checkpoint_backend") != "postgres":
+        raise AssertionError(observability)
+    if observability.get("langsmith_project") != "sqldbagent-dev":
+        raise AssertionError(observability)
+    if observability.get("langsmith_tracing") is not True:
+        raise AssertionError(observability)

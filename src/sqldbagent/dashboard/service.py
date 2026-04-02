@@ -15,6 +15,11 @@ from sqldbagent.adapters.langgraph.checkpoint import (
     create_sync_postgres_checkpointer,
 )
 from sqldbagent.adapters.langgraph.model import create_runtime_chat_model
+from sqldbagent.adapters.langgraph.observability import (
+    build_langsmith_metadata,
+    is_langsmith_tracing_enabled,
+    langsmith_tracing_context,
+)
 from sqldbagent.core.bootstrap import build_service_container
 from sqldbagent.core.config import AppSettings, load_settings
 from sqldbagent.dashboard.models import ChatMessageModel, ChatSessionModel
@@ -74,10 +79,21 @@ class DashboardChatService:
             datasource_name=resolved_datasource,
             schema_name=schema_name,
         ) as agent:
-            result = agent.invoke(
-                {"messages": [{"role": "user", "content": user_message}]},
-                config=config,
-            )
+            with langsmith_tracing_context(
+                settings=self._settings,
+                tags=["dashboard", resolved_datasource],
+                metadata=build_langsmith_metadata(
+                    surface="dashboard",
+                    datasource_name=resolved_datasource,
+                    schema_name=schema_name,
+                    thread_id=thread_id,
+                    operation="run_turn",
+                ),
+            ):
+                result = agent.invoke(
+                    {"messages": [{"role": "user", "content": user_message}]},
+                    config=config,
+                )
             return self._session_from_values(
                 thread_id=thread_id,
                 datasource_name=resolved_datasource,
@@ -192,10 +208,30 @@ class DashboardChatService:
             schema_name=schema_name,
             messages=self._render_messages(values.get("messages", [])),
             dashboard_payload=dict(values.get("dashboard_payload") or {}),
+            observability=self._build_observability_payload(),
             latest_snapshot_id=values.get("latest_snapshot_id"),
             latest_snapshot_summary=values.get("latest_snapshot_summary"),
             tool_call_digest=list(values.get("tool_call_digest") or []),
         )
+
+    def _build_observability_payload(self) -> dict[str, object]:
+        """Build UI-friendly observability details for the active session.
+
+        Returns:
+            dict[str, object]: Checkpoint and LangSmith status details.
+        """
+
+        langsmith_settings = self._settings.langsmith
+        return {
+            "checkpoint_backend": self._settings.agent.checkpoint.backend,
+            "checkpoint_is_durable": self._settings.agent.checkpoint.backend
+            == "postgres",
+            "langsmith_tracing": is_langsmith_tracing_enabled(self._settings),
+            "langsmith_project": langsmith_settings.project,
+            "langsmith_endpoint": langsmith_settings.endpoint,
+            "langsmith_workspace_id": langsmith_settings.workspace_id,
+            "langsmith_tags": list(langsmith_settings.tags),
+        }
 
     def _render_messages(self, messages: list[Any]) -> list[ChatMessageModel]:
         """Convert LangChain/LangGraph messages into dashboard transcript rows."""

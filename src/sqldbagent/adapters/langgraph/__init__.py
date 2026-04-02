@@ -17,6 +17,9 @@ __all__ = [
     "create_sqldbagent_system_prompt",
     "create_sync_postgres_checkpointer",
     "create_sync_postgres_checkpointed_agent",
+    "create_langsmith_client",
+    "is_langsmith_tracing_enabled",
+    "langsmith_tracing_context",
     "SQLDBAgentContext",
     "SQLDBAgentState",
 ]
@@ -46,6 +49,10 @@ _EXPORTS = {
         "sqldbagent.adapters.langgraph.checkpoint",
         "create_memory_checkpointer",
     ),
+    "create_langsmith_client": (
+        "sqldbagent.adapters.langgraph.observability",
+        "create_langsmith_client",
+    ),
     "create_sqldbagent_agent": (
         "sqldbagent.adapters.langgraph.agent",
         "create_sqldbagent_agent",
@@ -65,6 +72,14 @@ _EXPORTS = {
     "create_sync_postgres_checkpointed_agent": (
         "sqldbagent.adapters.langgraph.agent",
         "create_sync_postgres_checkpointed_agent",
+    ),
+    "is_langsmith_tracing_enabled": (
+        "sqldbagent.adapters.langgraph.observability",
+        "is_langsmith_tracing_enabled",
+    ),
+    "langsmith_tracing_context": (
+        "sqldbagent.adapters.langgraph.observability",
+        "langsmith_tracing_context",
     ),
     "SQLDBAgentContext": (
         "sqldbagent.adapters.langgraph.state",

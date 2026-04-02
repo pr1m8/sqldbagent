@@ -97,6 +97,26 @@ def test_settings_load_optional_llm_provider_keys(monkeypatch) -> None:
         raise AssertionError(settings.llm.anthropic_api_key)
 
 
+def test_settings_load_optional_langsmith_values(monkeypatch) -> None:
+    """Load LangSmith tracing values into nested settings."""
+
+    monkeypatch.setenv("LANGSMITH_API_KEY", "langsmith-test-key")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "sqldbagent-dev")
+    monkeypatch.setenv("LANGSMITH_TAGS", "sqldbagent,local,dashboard")
+
+    settings = AppSettings()
+
+    if settings.langsmith.api_key != "langsmith-test-key":
+        raise AssertionError(settings.langsmith.api_key)
+    if not settings.langsmith.tracing:
+        raise AssertionError(settings.langsmith.tracing)
+    if settings.langsmith.project != "sqldbagent-dev":
+        raise AssertionError(settings.langsmith.project)
+    if settings.langsmith.tags != ["sqldbagent", "local", "dashboard"]:
+        raise AssertionError(settings.langsmith.tags)
+
+
 def test_settings_synthesize_agent_checkpoint_postgres_url() -> None:
     """Build the agent checkpoint URL from standard Postgres env-style fields."""
 

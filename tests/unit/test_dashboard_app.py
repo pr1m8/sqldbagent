@@ -54,25 +54,8 @@ def test_resolve_dashboard_checkpointer_defers_to_postgres_backend() -> None:
 def test_build_checkpoint_status_reflects_backend() -> None:
     """Describe the dashboard persistence mode in plain language."""
 
-    memory_status = _build_checkpoint_status(
-        AppSettings(
-            datasources=[],
-            agent=AgentSettings(
-                checkpoint=AgentCheckpointSettings(backend="memory"),
-            ),
-        )
-    )
-    postgres_status = _build_checkpoint_status(
-        AppSettings(
-            datasources=[],
-            agent=AgentSettings(
-                checkpoint=AgentCheckpointSettings(
-                    backend="postgres",
-                    postgres_url="postgresql+psycopg://demo:demo@127.0.0.1:5432/demo",
-                ),
-            ),
-        )
-    )
+    memory_status = _build_checkpoint_status({"checkpoint_backend": "memory"})
+    postgres_status = _build_checkpoint_status({"checkpoint_backend": "postgres"})
 
     if "Streamlit session" not in memory_status:
         raise AssertionError(memory_status)

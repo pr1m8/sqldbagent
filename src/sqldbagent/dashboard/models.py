@@ -32,6 +32,7 @@ class ChatSessionModel(BaseModel):
         schema_name: Optional schema focus.
         messages: Rendered chat transcript entries.
         dashboard_payload: Dashboard-friendly state payload from the agent state.
+        observability: Dashboard-friendly runtime and tracing status payload.
         latest_snapshot_id: Latest known stored snapshot id.
         latest_snapshot_summary: Latest known stored snapshot summary.
         tool_call_digest: Compressed tool-call history from the agent state.
@@ -42,6 +43,7 @@ class ChatSessionModel(BaseModel):
     schema_name: str | None = None
     messages: list[ChatMessageModel] = Field(default_factory=list)
     dashboard_payload: dict[str, object] = Field(default_factory=dict)
+    observability: dict[str, object] = Field(default_factory=dict)
     latest_snapshot_id: str | None = None
     latest_snapshot_summary: str | None = None
     tool_call_digest: list[str] = Field(default_factory=list)

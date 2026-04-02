@@ -189,6 +189,64 @@ class LLMSettings(BaseModel):
     )
 
 
+class LangSmithSettings(BaseModel):
+    """LangSmith tracing and project settings.
+
+    Attributes:
+        tracing: Whether LangSmith tracing is enabled for supported surfaces.
+        project: LangSmith project name used for traces.
+        api_key: Optional LangSmith API key loaded from the environment.
+        endpoint: Optional LangSmith API endpoint override.
+        workspace_id: Optional LangSmith workspace identifier.
+        tags: Default LangSmith trace tags applied across surfaces.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    tracing: bool = False
+    project: str = "sqldbagent"
+    api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_API_KEY",
+            "LANGSMITH_API_KEY",
+        ),
+    )
+    endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_ENDPOINT",
+            "LANGSMITH_ENDPOINT",
+        ),
+    )
+    workspace_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_WORKSPACE_ID",
+            "LANGSMITH_WORKSPACE_ID",
+        ),
+    )
+    tags: list[str] = Field(default_factory=lambda: ["sqldbagent"])
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def validate_tags(cls, value: object) -> object:
+        """Normalize tag values from env strings or iterables.
+
+        Args:
+            value: Raw LangSmith tags value.
+
+        Returns:
+            object: Normalized list value for Pydantic parsing.
+        """
+
+        if value is None:
+            return ["sqldbagent"]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+
 class AgentCheckpointSettings(BaseModel):
     """Agent checkpoint persistence settings.
 
@@ -322,6 +380,7 @@ class AppSettings(BaseSettings):
         profiling: Default profiling settings.
         artifacts: Artifact persistence settings.
         llm: Optional model-provider settings.
+        langsmith: LangSmith tracing settings.
         embeddings: Embedding-provider settings.
         retrieval: Retrieval/vectorstore settings.
         agent: Agent orchestration settings.
@@ -343,6 +402,7 @@ class AppSettings(BaseSettings):
     profiling: ProfilingSettings = Field(default_factory=ProfilingSettings)
     artifacts: ArtifactSettings = Field(default_factory=ArtifactSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    langsmith: LangSmithSettings = Field(default_factory=LangSmithSettings)
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
@@ -405,6 +465,60 @@ class AppSettings(BaseSettings):
         default=None,
         validation_alias=AliasChoices(
             "SQLDBAGENT_ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_tracing: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_TRACING",
+            "LANGSMITH_TRACING",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_project: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_PROJECT",
+            "LANGSMITH_PROJECT",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_API_KEY",
+            "LANGSMITH_API_KEY",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_ENDPOINT",
+            "LANGSMITH_ENDPOINT",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_workspace_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_WORKSPACE_ID",
+            "LANGSMITH_WORKSPACE_ID",
+        ),
+        exclude=True,
+        repr=False,
+    )
+    langsmith_tags: list[str] | str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLDBAGENT_LANGSMITH_TAGS",
+            "LANGSMITH_TAGS",
         ),
         exclude=True,
         repr=False,
@@ -774,6 +888,38 @@ class AppSettings(BaseSettings):
                 or self.anthropic_api_key,
                 "anthropic_base_url": self.llm.anthropic_base_url
                 or self.anthropic_base_url,
+            }
+        )
+        self.langsmith = self.langsmith.model_copy(
+            update={
+                "tracing": (
+                    self.langsmith.tracing
+                    if self.langsmith_tracing is None
+                    else self.langsmith_tracing
+                ),
+                "project": (
+                    self.langsmith.project
+                    if self.langsmith_project is None
+                    else self.langsmith_project
+                ),
+                "api_key": self.langsmith.api_key or self.langsmith_api_key,
+                "endpoint": self.langsmith.endpoint or self.langsmith_endpoint,
+                "workspace_id": (
+                    self.langsmith.workspace_id or self.langsmith_workspace_id
+                ),
+                "tags": (
+                    self.langsmith.tags
+                    if self.langsmith_tags is None
+                    else (
+                        [
+                            item.strip()
+                            for item in self.langsmith_tags.split(",")
+                            if item.strip()
+                        ]
+                        if isinstance(self.langsmith_tags, str)
+                        else list(self.langsmith_tags)
+                    )
+                ),
             }
         )
         self.embeddings = self.embeddings.model_copy(
