@@ -173,6 +173,21 @@ class SnapshotRetrievalService:
             RetrievalResultModel: Retrieval result payload.
         """
 
+        target_snapshot = self._resolve_target_snapshot(
+            schema_name=schema_name,
+            snapshot_id=snapshot_id,
+        )
+        auto_indexed = False
+        if target_snapshot is not None and not self._manifest_exists(
+            schema_name=target_snapshot.regenerate.schema_name,
+            snapshot_id=target_snapshot.snapshot_id,
+        ):
+            self.index_snapshot_bundle(
+                target_snapshot,
+                recreate_collection=False,
+            )
+            auto_indexed = True
+
         vector_store = self._ensure_vector_store(recreate_collection=False)
         result_limit = limit or self._retrieval_settings.default_top_k
         qdrant_filter = self._build_filter(
@@ -181,6 +196,52 @@ class SnapshotRetrievalService:
             snapshot_id=snapshot_id,
             artifact_types=artifact_types,
         )
+        retrieved = self._search_vector_store(
+            vector_store=vector_store,
+            query=query,
+            qdrant_filter=qdrant_filter,
+            result_limit=result_limit,
+        )
+        if not retrieved and target_snapshot is not None and not auto_indexed:
+            self.index_snapshot_bundle(
+                target_snapshot,
+                recreate_collection=False,
+            )
+            auto_indexed = True
+            vector_store = self._ensure_vector_store(recreate_collection=False)
+            retrieved = self._search_vector_store(
+                vector_store=vector_store,
+                query=query,
+                qdrant_filter=qdrant_filter,
+                result_limit=result_limit,
+            )
+
+        summary_prefix = "Auto-indexed snapshot documents. " if auto_indexed else ""
+        summary = (
+            f"{summary_prefix}Retrieved {len(retrieved)} documents from collection "
+            f"'{self._collection_name}' for datasource '{self._datasource_name}'."
+        )
+        return RetrievalResultModel(
+            query=query,
+            datasource_name=self._datasource_name,
+            schema_name=schema_name,
+            table_name=table_name,
+            snapshot_id=snapshot_id,
+            collection_name=self._collection_name,
+            documents=retrieved,
+            summary=summary,
+        )
+
+    def _search_vector_store(
+        self,
+        *,
+        vector_store: Any,
+        query: str,
+        qdrant_filter: Any,
+        result_limit: int,
+    ) -> list[RetrievedDocumentModel]:
+        """Execute one filtered retrieval query against the vector store."""
+
         if self._retrieval_settings.use_mmr:
             documents = vector_store.max_marginal_relevance_search(
                 query,
@@ -215,21 +276,7 @@ class SnapshotRetrievalService:
                 )
                 for document, score in documents
             ]
-
-        summary = (
-            f"Retrieved {len(retrieved)} documents from collection "
-            f"'{self._collection_name}' for datasource '{self._datasource_name}'."
-        )
-        return RetrievalResultModel(
-            query=query,
-            datasource_name=self._datasource_name,
-            schema_name=schema_name,
-            table_name=table_name,
-            snapshot_id=snapshot_id,
-            collection_name=self._collection_name,
-            documents=retrieved,
-            summary=summary,
-        )
+        return retrieved
 
     @staticmethod
     def load_manifest(path: str | Path) -> RetrievalIndexManifestModel:
@@ -260,11 +307,9 @@ class SnapshotRetrievalService:
     def _save_manifest(self, manifest: RetrievalIndexManifestModel) -> Path:
         """Persist one retrieval manifest to disk."""
 
-        path = (
-            self.manifest_dir
-            / manifest.datasource_name
-            / manifest.schema_name
-            / f"{manifest.snapshot_id}.json"
+        path = self.manifest_path(
+            schema_name=manifest.schema_name,
+            snapshot_id=manifest.snapshot_id,
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(
@@ -274,6 +319,37 @@ class SnapshotRetrievalService:
             )
         )
         return path
+
+    def _manifest_exists(self, *, schema_name: str, snapshot_id: str) -> bool:
+        """Return whether a retrieval manifest already exists for one snapshot."""
+
+        return self.manifest_path(
+            schema_name=schema_name,
+            snapshot_id=snapshot_id,
+        ).exists()
+
+    def manifest_path(self, *, schema_name: str, snapshot_id: str) -> Path:
+        """Return the saved manifest path for one schema snapshot."""
+
+        return (
+            self.manifest_dir
+            / self._datasource_name
+            / schema_name
+            / f"{snapshot_id}.json"
+        )
+
+    def load_saved_manifest(
+        self,
+        *,
+        schema_name: str,
+        snapshot_id: str,
+    ) -> RetrievalIndexManifestModel | None:
+        """Load a saved retrieval manifest when one exists."""
+
+        path = self.manifest_path(schema_name=schema_name, snapshot_id=snapshot_id)
+        if not path.exists():
+            return None
+        return self.load_manifest(path)
 
     def _ensure_vector_store(self, *, recreate_collection: bool) -> Any:
         """Return a ready-to-use LangChain Qdrant vector store."""
@@ -305,25 +381,76 @@ class SnapshotRetrievalService:
         if force_recreate:
             if client.collection_exists(self._collection_name):
                 client.delete_collection(self._collection_name)
-            client.create_collection(
-                self._collection_name,
-                vectors_config=vector_params,
-                on_disk_payload=True,
+            self._call_qdrant_with_exists_tolerance(
+                lambda: client.create_collection(
+                    self._collection_name,
+                    vectors_config=vector_params,
+                    on_disk_payload=True,
+                )
             )
         elif not client.collection_exists(self._collection_name):
-            client.create_collection(
-                self._collection_name,
-                vectors_config=vector_params,
-                on_disk_payload=True,
+            self._call_qdrant_with_exists_tolerance(
+                lambda: client.create_collection(
+                    self._collection_name,
+                    vectors_config=vector_params,
+                    on_disk_payload=True,
+                )
             )
 
         if self._retrieval_settings.create_payload_indexes:
             for field_name in self._PAYLOAD_INDEX_FIELDS:
-                client.create_payload_index(
-                    self._collection_name,
-                    field_name,
-                    qdrant_models.PayloadSchemaType.KEYWORD,
+                self._call_qdrant_with_exists_tolerance(
+                    lambda field_name=field_name: client.create_payload_index(
+                        self._collection_name,
+                        field_name,
+                        qdrant_models.PayloadSchemaType.KEYWORD,
+                    )
                 )
+
+    def _resolve_target_snapshot(
+        self,
+        *,
+        schema_name: str | None,
+        snapshot_id: str | None,
+    ) -> SnapshotBundleModel | None:
+        """Resolve the snapshot bundle most relevant to a retrieval request."""
+
+        entries = SnapshotService.list_saved_snapshots(
+            self._artifacts,
+            datasource_name=self._datasource_name,
+            schema_name=schema_name,
+        )
+        root = SnapshotService._snapshot_dir_from_artifacts(self._artifacts)
+        if snapshot_id is not None:
+            for entry in entries:
+                if entry.snapshot_id == snapshot_id:
+                    return SnapshotService.load_snapshot(root / entry.path)
+            return None
+        if entries:
+            return SnapshotService.load_snapshot(root / entries[0].path)
+        return None
+
+    @staticmethod
+    def _call_qdrant_with_exists_tolerance(operation: Any) -> None:
+        """Run one Qdrant mutation while tolerating duplicate-create races."""
+
+        try:
+            operation()
+        except Exception as exc:  # noqa: BLE001
+            if SnapshotRetrievalService._is_qdrant_exists_conflict(exc):
+                return
+            raise
+
+    @staticmethod
+    def _is_qdrant_exists_conflict(exc: Exception) -> bool:
+        """Return whether an exception represents an already-exists conflict."""
+
+        normalized = str(exc).lower()
+        return (
+            "already exists" in normalized
+            or "409 (conflict)" in normalized
+            or "status code 409" in normalized
+        )
 
     def _build_filter(
         self,
