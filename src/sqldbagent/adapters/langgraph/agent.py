@@ -14,6 +14,11 @@ from sqldbagent.adapters.langgraph.checkpoint import (
 from sqldbagent.adapters.langgraph.middleware import create_sqldbagent_middleware
 from sqldbagent.adapters.langgraph.prompts import create_sqldbagent_system_prompt
 from sqldbagent.adapters.langgraph.state import SQLDBAgentContext, SQLDBAgentState
+from sqldbagent.adapters.langgraph.store import (
+    create_async_postgres_store,
+    create_memory_store,
+    create_sync_postgres_store,
+)
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer
 from sqldbagent.core.config import AppSettings, load_settings
@@ -27,6 +32,7 @@ def create_sqldbagent_agent(
     settings: AppSettings | None = None,
     schema_name: str | None = None,
     checkpointer: Any | None = None,
+    store: Any | None = None,
     middleware: Sequence[Any] = (),
     include_default_middleware: bool = True,
     interrupt_before: list[str] | None = None,
@@ -42,6 +48,7 @@ def create_sqldbagent_agent(
         settings: Optional application settings.
         schema_name: Optional schema focus.
         checkpointer: Optional LangGraph checkpointer.
+        store: Optional LangGraph long-term memory store.
         middleware: Optional additional LangChain middleware chain.
         include_default_middleware: Whether to prepend sqldbagent's default middleware.
         interrupt_before: Optional LangGraph interrupt hook points.
@@ -61,6 +68,7 @@ def create_sqldbagent_agent(
                 datasource_name=datasource_name,
                 settings=resolved_settings,
                 schema_name=schema_name,
+                services=services,
             ),
             *resolved_middleware,
         ]
@@ -81,6 +89,7 @@ def create_sqldbagent_agent(
         state_schema=SQLDBAgentState,
         context_schema=SQLDBAgentContext,
         checkpointer=checkpointer,
+        store=store,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
         debug=debug,
@@ -122,19 +131,21 @@ def create_sync_postgres_checkpointed_agent(
 
     resolved_settings = settings or load_settings()
     with create_sync_postgres_checkpointer(settings=resolved_settings) as checkpointer:
-        yield create_sqldbagent_agent(
-            services=services,
-            model=model,
-            datasource_name=datasource_name,
-            settings=resolved_settings,
-            schema_name=schema_name,
-            checkpointer=checkpointer,
-            middleware=middleware,
-            include_default_middleware=include_default_middleware,
-            interrupt_before=interrupt_before,
-            interrupt_after=interrupt_after,
-            debug=debug,
-        )
+        with _configured_sync_store(settings=resolved_settings) as store:
+            yield create_sqldbagent_agent(
+                services=services,
+                model=model,
+                datasource_name=datasource_name,
+                settings=resolved_settings,
+                schema_name=schema_name,
+                checkpointer=checkpointer,
+                store=store,
+                middleware=middleware,
+                include_default_middleware=include_default_middleware,
+                interrupt_before=interrupt_before,
+                interrupt_after=interrupt_after,
+                debug=debug,
+            )
 
 
 @asynccontextmanager
@@ -173,16 +184,50 @@ async def create_async_postgres_checkpointed_agent(
     async with create_async_postgres_checkpointer(
         settings=resolved_settings
     ) as checkpointer:
-        yield create_sqldbagent_agent(
-            services=services,
-            model=model,
-            datasource_name=datasource_name,
-            settings=resolved_settings,
-            schema_name=schema_name,
-            checkpointer=checkpointer,
-            middleware=middleware,
-            include_default_middleware=include_default_middleware,
-            interrupt_before=interrupt_before,
-            interrupt_after=interrupt_after,
-            debug=debug,
-        )
+        async with _configured_async_store(settings=resolved_settings) as store:
+            yield create_sqldbagent_agent(
+                services=services,
+                model=model,
+                datasource_name=datasource_name,
+                settings=resolved_settings,
+                schema_name=schema_name,
+                checkpointer=checkpointer,
+                store=store,
+                middleware=middleware,
+                include_default_middleware=include_default_middleware,
+                interrupt_before=interrupt_before,
+                interrupt_after=interrupt_after,
+                debug=debug,
+            )
+
+
+@contextmanager
+def _configured_sync_store(*, settings: AppSettings) -> Iterator[Any | None]:
+    """Yield the configured sync LangGraph store for the current settings."""
+
+    backend = settings.agent.memory.backend
+    if backend == "disabled":
+        yield None
+        return
+    if backend == "postgres" and settings.agent.memory.postgres_url is not None:
+        with create_sync_postgres_store(settings=settings) as store:
+            yield store
+        return
+    yield create_memory_store()
+
+
+@asynccontextmanager
+async def _configured_async_store(
+    *, settings: AppSettings
+) -> AsyncIterator[Any | None]:
+    """Yield the configured async LangGraph store for the current settings."""
+
+    backend = settings.agent.memory.backend
+    if backend == "disabled":
+        yield None
+        return
+    if backend == "postgres" and settings.agent.memory.postgres_url is not None:
+        async with create_async_postgres_store(settings=settings) as store:
+            yield store
+        return
+    yield create_memory_store()
