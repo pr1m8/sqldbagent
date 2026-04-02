@@ -23,6 +23,10 @@ from sqldbagent.adapters.langgraph.observability import (
     is_langsmith_tracing_enabled,
     langsmith_tracing_context,
 )
+from sqldbagent.adapters.langgraph.store import (
+    create_memory_store,
+    create_sync_postgres_store,
+)
 from sqldbagent.core.bootstrap import build_service_container
 from sqldbagent.core.config import AppSettings, load_settings
 from sqldbagent.core.enums import Dialect
@@ -51,6 +55,7 @@ class DashboardChatService:
         settings: AppSettings | None = None,
         model: Any | None = None,
         checkpointer: Any | None = None,
+        store: Any | None = None,
     ) -> None:
         """Initialize the dashboard chat service.
 
@@ -58,11 +63,14 @@ class DashboardChatService:
             settings: Optional application settings.
             model: Optional prebuilt LangChain-compatible model for tests.
             checkpointer: Optional externally managed checkpointer for tests.
+            store: Optional externally managed long-term memory store for tests
+                or dashboard-session reuse.
         """
 
         self._settings = settings or load_settings()
         self._model = model
         self._checkpointer = checkpointer
+        self._store = store
 
     @staticmethod
     def new_thread_id() -> str:
@@ -552,14 +560,16 @@ class DashboardChatService:
             model = self._model or create_runtime_chat_model(self._settings)
             if self._checkpointer is not None:
                 with nullcontext(self._checkpointer) as checkpointer:
-                    yield create_sqldbagent_agent(
-                        services=container,
-                        model=model,
-                        datasource_name=datasource_name,
-                        settings=self._settings,
-                        schema_name=schema_name,
-                        checkpointer=checkpointer,
-                    )
+                    with self._resolved_store() as store:
+                        yield create_sqldbagent_agent(
+                            services=container,
+                            model=model,
+                            datasource_name=datasource_name,
+                            settings=self._settings,
+                            schema_name=schema_name,
+                            checkpointer=checkpointer,
+                            store=store,
+                        )
                 return
 
             if (
@@ -569,24 +579,28 @@ class DashboardChatService:
                 with create_sync_postgres_checkpointer(
                     settings=self._settings
                 ) as checkpointer:
-                    yield create_sqldbagent_agent(
-                        services=container,
-                        model=model,
-                        datasource_name=datasource_name,
-                        settings=self._settings,
-                        schema_name=schema_name,
-                        checkpointer=checkpointer,
-                    )
+                    with self._resolved_store() as store:
+                        yield create_sqldbagent_agent(
+                            services=container,
+                            model=model,
+                            datasource_name=datasource_name,
+                            settings=self._settings,
+                            schema_name=schema_name,
+                            checkpointer=checkpointer,
+                            store=store,
+                        )
                 return
 
-            yield create_sqldbagent_agent(
-                services=container,
-                model=model,
-                datasource_name=datasource_name,
-                settings=self._settings,
-                schema_name=schema_name,
-                checkpointer=create_memory_checkpointer(),
-            )
+            with self._resolved_store() as store:
+                yield create_sqldbagent_agent(
+                    services=container,
+                    model=model,
+                    datasource_name=datasource_name,
+                    settings=self._settings,
+                    schema_name=schema_name,
+                    checkpointer=create_memory_checkpointer(),
+                    store=store,
+                )
         finally:
             container.close()
 
@@ -648,8 +662,10 @@ class DashboardChatService:
 
         langsmith_settings = self._settings.langsmith
         checkpoint_payload = self._build_checkpoint_observability()
+        memory_payload = self._build_memory_observability()
         return {
             **checkpoint_payload,
+            **memory_payload,
             "database_access_mode": "guarded_read_only",
             "database_access_summary": self._build_database_access_summary(
                 datasource_name=datasource_name
@@ -739,6 +755,79 @@ class DashboardChatService:
             ),
         }
 
+    def _build_memory_observability(self) -> dict[str, object]:
+        """Build long-term memory runtime details for dashboard observability."""
+
+        requested_backend = self._settings.agent.memory.backend
+        memory_url = self._settings.agent.memory.postgres_url
+
+        if self._store is not None:
+            active_backend = self._detect_store_backend(self._store) or "memory"
+            is_durable = active_backend == "postgres"
+            is_fallback = requested_backend == "postgres" and not is_durable
+            return {
+                "memory_backend": active_backend,
+                "memory_requested_backend": requested_backend,
+                "memory_is_durable": is_durable,
+                "memory_status": (
+                    "durable"
+                    if is_durable
+                    else "fallback" if is_fallback else "session"
+                ),
+                "memory_summary": (
+                    "Long-term database memory is durable through a Postgres store."
+                    if is_durable
+                    else (
+                        "Postgres long-term memory was requested, but the dashboard is currently using a session store."
+                        if is_fallback
+                        else "Long-term database memory is scoped to the current dashboard session."
+                    )
+                ),
+            }
+
+        if requested_backend == "disabled":
+            return {
+                "memory_backend": "disabled",
+                "memory_requested_backend": requested_backend,
+                "memory_is_durable": False,
+                "memory_status": "disabled",
+                "memory_summary": (
+                    "Long-term database memory is disabled for this dashboard run."
+                ),
+            }
+
+        if requested_backend == "postgres" and memory_url is not None:
+            return {
+                "memory_backend": "postgres",
+                "memory_requested_backend": requested_backend,
+                "memory_is_durable": True,
+                "memory_status": "durable",
+                "memory_summary": (
+                    "Long-term database memory is durable through the configured Postgres store."
+                ),
+            }
+
+        if requested_backend == "postgres":
+            return {
+                "memory_backend": "memory",
+                "memory_requested_backend": requested_backend,
+                "memory_is_durable": False,
+                "memory_status": "fallback",
+                "memory_summary": (
+                    "Postgres long-term memory was requested, but no store database URL is configured, so the dashboard fell back to a session store."
+                ),
+            }
+
+        return {
+            "memory_backend": "memory",
+            "memory_requested_backend": requested_backend,
+            "memory_is_durable": False,
+            "memory_status": "session",
+            "memory_summary": (
+                "Long-term database memory is scoped to the current dashboard session."
+            ),
+        }
+
     @staticmethod
     def _detect_checkpointer_backend(checkpointer: object) -> str | None:
         """Infer the backend type for an externally supplied checkpointer."""
@@ -746,6 +835,17 @@ class DashboardChatService:
         identity = (
             f"{checkpointer.__class__.__module__}.{checkpointer.__class__.__name__}"
         ).lower()
+        if "postgres" in identity:
+            return "postgres"
+        if "memory" in identity or "inmemory" in identity:
+            return "memory"
+        return None
+
+    @staticmethod
+    def _detect_store_backend(store: object) -> str | None:
+        """Infer the backend type for an externally supplied long-term store."""
+
+        identity = f"{store.__class__.__module__}.{store.__class__.__name__}".lower()
         if "postgres" in identity:
             return "postgres"
         if "memory" in identity or "inmemory" in identity:
@@ -769,6 +869,29 @@ class DashboardChatService:
         return (
             "All dashboard SQL stays on the central guarded read-only execution path."
         )
+
+    @contextmanager
+    def _resolved_store(self) -> Iterator[Any | None]:
+        """Resolve the effective long-term store for the current dashboard session."""
+
+        if self._store is not None:
+            with nullcontext(self._store) as store:
+                yield store
+            return
+
+        if (
+            self._settings.agent.memory.backend == "postgres"
+            and self._settings.agent.memory.postgres_url is not None
+        ):
+            with create_sync_postgres_store(settings=self._settings) as store:
+                yield store
+            return
+
+        if self._settings.agent.memory.backend == "disabled":
+            yield None
+            return
+
+        yield create_memory_store()
 
     @staticmethod
     def _emit_progress(
