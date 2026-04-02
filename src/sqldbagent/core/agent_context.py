@@ -63,6 +63,8 @@ def build_sqldbagent_state_seed(
         "prompt_enhancement_summary": (
             prompt_enhancement.summary if prompt_enhancement is not None else None
         ),
+        "remembered_context_active": False,
+        "remembered_context_summary": None,
         "dashboard_payload": dashboard_payload,
         "tool_call_digest": [],
     }
