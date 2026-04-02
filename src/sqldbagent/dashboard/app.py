@@ -2,9 +2,52 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from uuid import uuid4
 
+from sqldbagent.adapters.langgraph.checkpoint import create_memory_checkpointer
+from sqldbagent.core.config import AppSettings
 from sqldbagent.dashboard.service import DashboardChatService
+
+
+def _resolve_dashboard_checkpointer(
+    session_state: MutableMapping[str, object],
+    settings: AppSettings,
+) -> object | None:
+    """Resolve the dashboard checkpointer for the active UI session.
+
+    Args:
+        session_state: Streamlit session state mapping.
+        settings: Application settings.
+
+    Returns:
+        object | None: A stable per-session memory saver when Postgres
+        checkpointing is not enabled; otherwise `None` so the service can use
+        the configured Postgres saver.
+    """
+
+    if settings.agent.checkpoint.backend == "postgres":
+        return None
+    checkpointer = session_state.get("dashboard_checkpointer")
+    if checkpointer is None:
+        checkpointer = create_memory_checkpointer()
+        session_state["dashboard_checkpointer"] = checkpointer
+    return checkpointer
+
+
+def _build_checkpoint_status(settings: AppSettings) -> str:
+    """Build sidebar copy describing the active checkpoint mode.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        str: Human-readable checkpoint description for the dashboard sidebar.
+    """
+
+    if settings.agent.checkpoint.backend == "postgres":
+        return "Persistence is enabled through the configured Postgres checkpointer."
+    return "Persistence is scoped to this Streamlit session via an in-memory saver."
 
 
 def main() -> None:
@@ -19,7 +62,10 @@ def main() -> None:
         layout="wide",
     )
     settings = load_settings()
-    service = DashboardChatService(settings=settings)
+    service = DashboardChatService(
+        settings=settings,
+        checkpointer=_resolve_dashboard_checkpointer(st.session_state, settings),
+    )
 
     datasource_options = [datasource.name for datasource in settings.datasources]
     if not datasource_options:
@@ -67,10 +113,7 @@ def main() -> None:
         st.write(
             f"Checkpoint backend: `{settings.agent.checkpoint.backend}`",
         )
-        if settings.agent.checkpoint.backend == "postgres":
-            st.write(
-                "Persistence is enabled through the configured Postgres checkpointer."
-            )
+        st.write(_build_checkpoint_status(settings))
 
     session = service.load_thread(
         thread_id=thread_id,
