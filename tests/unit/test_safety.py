@@ -71,3 +71,43 @@ def test_query_lint_normalizes_sql_without_limit_rewrite() -> None:
         raise AssertionError(result)
     if "LIMIT 10" in (result.normalized_sql or ""):
         raise AssertionError(result.normalized_sql)
+
+
+def test_query_guard_allows_writable_dml_when_policy_enables_it() -> None:
+    """Allow a writable statement only when the datasource policy opts in."""
+
+    guard = QueryGuardService(
+        policy=SafetySettings(read_only=True, allow_writes=True),
+        dialect=Dialect.POSTGRES,
+    )
+
+    result = guard.guard(
+        "UPDATE users SET email = 'new@example.com' WHERE id = 1",
+        access_mode="writable",
+    )
+
+    if not result.allowed:
+        raise AssertionError(result.reasons)
+    if result.access_mode != "writable":
+        raise AssertionError(result)
+    if not result.warnings:
+        raise AssertionError(result)
+
+
+def test_query_guard_denies_writable_mode_when_policy_disables_it() -> None:
+    """Reject writable mode when the datasource policy keeps writes disabled."""
+
+    guard = QueryGuardService(
+        policy=SafetySettings(read_only=True, allow_writes=False),
+        dialect=Dialect.POSTGRES,
+    )
+
+    result = guard.guard(
+        "UPDATE users SET email = 'new@example.com' WHERE id = 1",
+        access_mode="writable",
+    )
+
+    if result.allowed:
+        raise AssertionError(result)
+    if "writable access mode is unavailable" not in " ".join(result.reasons):
+        raise AssertionError(result.reasons)
