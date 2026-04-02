@@ -82,6 +82,22 @@ class SampleTableInput(BaseModel):
     limit: int = Field(default=5, ge=1)
 
 
+class GetUniqueValuesInput(BaseModel):
+    """Input for distinct-value lookup.
+
+    Attributes:
+        table_name: Table name containing the target column.
+        column_name: Column name whose unique values should be returned.
+        schema_name: Optional schema containing the table.
+        limit: Maximum number of distinct values to return.
+    """
+
+    table_name: str
+    column_name: str
+    schema_name: str | None = Field(default=None)
+    limit: int = Field(default=20, ge=1)
+
+
 class SafeQuerySqlInput(BaseModel):
     """Input for guarded SQL execution.
 
@@ -284,6 +300,19 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 limit=limit,
             )
 
+        def get_unique_values(
+            table_name: str,
+            column_name: str,
+            schema_name: str | None = None,
+            limit: int = 20,
+        ) -> dict[str, Any]:
+            return services.profiler.get_unique_values(
+                table_name=table_name,
+                column_name=column_name,
+                schema=schema_name,
+                limit=limit,
+            ).model_dump(mode="json")
+
         tools.extend(
             [
                 structured_tool.from_function(
@@ -297,6 +326,12 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                     name="sample_table",
                     description="Return sample rows for a table.",
                     args_schema=SampleTableInput,
+                ),
+                structured_tool.from_function(
+                    func=get_unique_values,
+                    name="get_unique_values",
+                    description="Return distinct values and counts for one column.",
+                    args_schema=GetUniqueValuesInput,
                 ),
             ]
         )

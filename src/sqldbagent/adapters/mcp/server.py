@@ -86,6 +86,20 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
                 limit=limit,
             )
 
+        @server.tool
+        def get_unique_values(
+            table_name: str,
+            column_name: str,
+            schema: str | None = None,
+            limit: int = 20,
+        ) -> dict[str, Any]:
+            return services.profiler.get_unique_values(
+                table_name=table_name,
+                column_name=column_name,
+                schema=schema,
+                limit=limit,
+            ).model_dump(mode="json")
+
     if services.snapshotter is not None:
 
         @server.tool
@@ -245,7 +259,7 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             "describe_view",
         ]
         if services.profiler is not None:
-            tools.extend(["profile_table", "sample_table"])
+            tools.extend(["profile_table", "sample_table", "get_unique_values"])
         if services.snapshotter is not None:
             tools.extend(["create_snapshot", "diff_snapshots"])
         if services.document_service is not None and services.snapshotter is not None:
