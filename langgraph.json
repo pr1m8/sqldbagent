@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "sqldbagent": "./src/sqldbagent/adapters/langgraph/runtime.py:agent"
+  },
+  "env": "./.env"
+}
