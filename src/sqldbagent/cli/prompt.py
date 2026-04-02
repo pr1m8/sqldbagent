@@ -113,6 +113,11 @@ def save_enhancement(
         "--business-rules",
         help="Business rules or caveats to keep in the prompt.",
     ),
+    additional_effective_context: str = typer.Option(
+        "",
+        "--additional-effective-context",
+        help="Extra instructions to inject directly into the effective prompt.",
+    ),
     answer_style: str = typer.Option(
         "",
         "--answer-style",
@@ -136,6 +141,8 @@ def save_enhancement(
         schema: Schema name.
         user_context: Freeform domain notes.
         business_rules: Business rules or caveats.
+        additional_effective_context: Extra instructions merged directly into
+            the effective prompt.
         answer_style: Preferred answer style for agent responses.
         active: Whether the enhancement should be active.
         refresh_generated: Whether to refresh DB-aware guidance from the snapshot.
@@ -152,6 +159,7 @@ def save_enhancement(
             active=active,
             user_context=user_context,
             business_rules=business_rules,
+            additional_effective_context=additional_effective_context,
             answer_style=answer_style,
             refresh_generated=refresh_generated,
         )

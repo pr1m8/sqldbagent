@@ -72,3 +72,35 @@ def sample(
         container.close()
 
     typer.echo(orjson.dumps(result, option=orjson.OPT_INDENT_2).decode())
+
+
+@app.command("unique-values")
+def unique_values(
+    datasource: str,
+    table_name: str,
+    column_name: str,
+    schema: str | None = None,
+    limit: int = 20,
+) -> None:
+    """Return distinct values and counts for one column.
+
+    Args:
+        datasource: Datasource identifier.
+        table_name: Table name containing the column.
+        column_name: Column name whose distinct values should be returned.
+        schema: Optional schema name.
+        limit: Maximum number of distinct values to emit.
+    """
+
+    container = build_service_container(datasource, settings=load_settings())
+    try:
+        result = container.profiler.get_unique_values(
+            table_name=table_name,
+            column_name=column_name,
+            schema=schema,
+            limit=limit,
+        )
+    finally:
+        container.close()
+
+    typer.echo(result.model_dump_json(indent=2))
