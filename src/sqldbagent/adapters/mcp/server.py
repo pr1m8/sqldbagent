@@ -122,6 +122,22 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             payload["path"] = path.as_posix()
             return payload
 
+    if services.prompt_service is not None and services.snapshotter is not None:
+
+        @server.tool
+        def export_prompt_context(schema: str) -> dict[str, Any]:
+            bundle = services.snapshotter.load_latest_saved_snapshot(schema)
+            prompt_bundle = services.prompt_service.create_prompt_bundle(bundle)
+            path = services.prompt_service.save_prompt_bundle(prompt_bundle)
+            payload = prompt_bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            payload["markdown_path"] = services.prompt_service.markdown_path(
+                datasource_name=prompt_bundle.datasource_name,
+                schema_name=prompt_bundle.schema_name,
+                snapshot_id=prompt_bundle.snapshot_id,
+            ).as_posix()
+            return payload
+
     if services.diagram_service is not None and services.snapshotter is not None:
 
         @server.tool
@@ -234,6 +250,8 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             tools.extend(["create_snapshot", "diff_snapshots"])
         if services.document_service is not None and services.snapshotter is not None:
             tools.append("export_schema_documents")
+        if services.prompt_service is not None and services.snapshotter is not None:
+            tools.append("export_prompt_context")
         if services.diagram_service is not None and services.snapshotter is not None:
             tools.append("generate_mermaid_erd")
         if services.retrieval_service is not None:

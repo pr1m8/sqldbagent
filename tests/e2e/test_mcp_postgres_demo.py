@@ -43,6 +43,10 @@ async def test_mcp_postgres_demo_end_to_end(
             "export_schema_documents",
             {"schema": "public"},
         )
+        prompt_bundle = await server.call_tool(
+            "export_prompt_context",
+            {"schema": "public"},
+        )
         index_result = await server.call_tool(
             "index_schema_documents",
             {"schema": "public", "recreate_collection": True},
@@ -82,6 +86,9 @@ async def test_mcp_postgres_demo_end_to_end(
     documents_payload = documents.structured_content
     if not documents_payload.get("documents"):
         raise AssertionError(documents_payload)
+    prompt_payload = prompt_bundle.structured_content
+    if "system_prompt" not in prompt_payload or "markdown_path" not in prompt_payload:
+        raise AssertionError(prompt_payload)
     if index_result.structured_content.get("document_count", 0) <= 0:
         raise AssertionError(index_result.structured_content)
     retrieval_payload = retrieval.structured_content
@@ -99,4 +106,6 @@ async def test_mcp_postgres_demo_end_to_end(
         raise AssertionError(prompt)
     capabilities_payload = orjson.loads(capabilities.contents[0].content)
     if "generate_mermaid_erd" not in capabilities_payload.get("tools", []):
+        raise AssertionError(capabilities_payload)
+    if "export_prompt_context" not in capabilities_payload.get("tools", []):
         raise AssertionError(capabilities_payload)

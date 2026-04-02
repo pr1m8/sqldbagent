@@ -78,6 +78,7 @@ class ArtifactSettings(BaseModel):
         snapshots_dir: Snapshot subdirectory under `root_dir`.
         documents_dir: Document-export subdirectory under `root_dir`.
         diagrams_dir: Diagram-export subdirectory under `root_dir`.
+        prompts_dir: Prompt-export subdirectory under `root_dir`.
         embeddings_cache_dir: Embedding cache subdirectory under `root_dir`.
         vectorstores_dir: Retrieval/vectorstore manifest subdirectory under `root_dir`.
     """
@@ -88,6 +89,7 @@ class ArtifactSettings(BaseModel):
     snapshots_dir: str = "snapshots"
     documents_dir: str = "documents"
     diagrams_dir: str = "diagrams"
+    prompts_dir: str = "prompts"
     embeddings_cache_dir: str = "embeddings-cache"
     vectorstores_dir: str = "vectorstores"
 
@@ -246,6 +248,30 @@ class AgentSettings(BaseModel):
     checkpoint: AgentCheckpointSettings = Field(default_factory=AgentCheckpointSettings)
 
 
+class MCPSettings(BaseModel):
+    """FastMCP server settings.
+
+    Attributes:
+        transport: Default MCP transport to serve.
+        host: Default host for HTTP-based transports.
+        port: Default port for HTTP-based transports.
+        path: Default HTTP path for streamable transports.
+        log_level: Default FastMCP/Uvicorn log level for HTTP transports.
+        show_banner: Whether the FastMCP banner should be shown on startup.
+        stateless_http: Whether streamable HTTP should run in stateless mode.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    transport: Literal["stdio", "http", "sse", "streamable-http"] = "stdio"
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, ge=1)
+    path: str = "/mcp"
+    log_level: str = "info"
+    show_banner: bool = True
+    stateless_http: bool = False
+
+
 class DatasourceSettings(BaseModel):
     """Single datasource definition.
 
@@ -299,6 +325,7 @@ class AppSettings(BaseSettings):
         embeddings: Embedding-provider settings.
         retrieval: Retrieval/vectorstore settings.
         agent: Agent orchestration settings.
+        mcp: FastMCP server settings.
     """
 
     model_config = SettingsConfigDict(
@@ -319,6 +346,7 @@ class AppSettings(BaseSettings):
     embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
     default_datasource_name: str | None = Field(
         default=None,
         validation_alias=AliasChoices(

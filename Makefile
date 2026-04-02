@@ -11,7 +11,7 @@ DEMO_SCHEMA ?= public
 DEMO_QUERY ?= Which tables model customers, orders, and support tickets?
 DEMO_ENV = POSTGRES_DEMO_HOST=$(DEMO_HOST) POSTGRES_DEMO_PORT=$(DEMO_PORT) POSTGRES_DEMO_DB=$(DEMO_DB) POSTGRES_DEMO_USER=$(DEMO_USER) POSTGRES_DEMO_PASSWORD=$(DEMO_PASSWORD) SQLDBAGENT_DEFAULT_DATASOURCE=postgres_demo
 
-.PHONY: install install-all fix check test test-unit test-integration test-e2e test-e2e-postgres test-integration-postgres test-integration-agent test-integration-retrieval up up-advanced down ps logs-postgres logs-postgres-demo logs-mssql logs-qdrant db-up db-up-postgres db-up-postgres-demo db-up-mssql db-up-qdrant db-down db-ps db-logs-postgres db-logs-postgres-demo db-logs-mssql db-logs-qdrant langgraph-dev demo-up demo-migrate demo-current demo-history demo-inspect demo-snapshot demo-diagram demo-rag-index demo-rag-query
+.PHONY: install install-all fix check test test-unit test-integration test-e2e test-e2e-postgres test-integration-postgres test-integration-agent test-integration-retrieval up up-advanced down ps logs-postgres logs-postgres-demo logs-mssql logs-qdrant db-up db-up-postgres db-up-postgres-demo db-up-mssql db-up-qdrant db-down db-ps db-logs-postgres db-logs-postgres-demo db-logs-mssql db-logs-qdrant langgraph-dev mcp-stdio mcp-http demo-up demo-migrate demo-current demo-history demo-inspect demo-snapshot demo-diagram demo-prompt demo-rag-index demo-rag-query
 
 install:
 	$(PDM) install -G test -G lint -G typecheck
@@ -100,6 +100,12 @@ db-logs-qdrant:
 langgraph-dev:
 	$(PDM) run langgraph dev
 
+mcp-stdio:
+	$(PDM) run sqldbagent mcp serve postgres_demo --transport stdio
+
+mcp-http:
+	$(PDM) run sqldbagent mcp serve postgres_demo --transport streamable-http
+
 demo-up: db-up-postgres-demo demo-migrate
 
 demo-migrate:
@@ -119,6 +125,9 @@ demo-snapshot:
 
 demo-diagram:
 	$(DEMO_ENV) $(PDM) run sqldbagent diagram schema postgres_demo $(DEMO_SCHEMA)
+
+demo-prompt:
+	$(DEMO_ENV) $(PDM) run sqldbagent prompt export postgres_demo $(DEMO_SCHEMA)
 
 demo-rag-index:
 	$(DEMO_ENV) SQLDBAGENT_EMBEDDINGS_PROVIDER=hash SQLDBAGENT_EMBEDDINGS_DIMENSIONS=64 $(PDM) run sqldbagent rag index postgres_demo $(DEMO_SCHEMA) --recreate-collection

@@ -68,6 +68,7 @@ What we should take from LangChain v1:
 Repo decisions:
 
 - prompts should be large, descriptive, and grounded in stored snapshot context
+- prompt exports should be durable artifacts with JSON and Markdown forms so operators can review and reuse them outside a live agent run
 - state should be dashboard-friendly and reusable for future UI surfaces
 - tool-call digests should retain high-signal results without preserving every raw tool payload forever
 - summarization should trigger around 90% of context when enabled
@@ -114,6 +115,7 @@ Implementation decisions:
 - default document source is stored snapshot exports, not raw row dumps
 - LangChain community `SQLDatabaseLoader` is a secondary helper for targeted row-to-document workflows, not the main architecture
 - `langgraph.json` should point at the local project root and let `pyproject.toml` define dependencies
+- FastMCP transport defaults should come from `.env` so stdio, SSE, HTTP, and streamable HTTP can be switched without code edits
 
 ## Next Agent Work
 

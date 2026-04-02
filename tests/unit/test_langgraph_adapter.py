@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import create_engine, text
 
 from sqldbagent.adapters.langgraph import (
+    build_sqldbagent_state_seed,
     create_memory_checkpointer,
     create_sqldbagent_agent,
     create_sqldbagent_middleware,
@@ -65,6 +66,8 @@ def test_langgraph_system_prompt_uses_latest_snapshot_summary(tmp_path: Path) ->
     if "STORED SNAPSHOT CONTEXT:" not in prompt:
         raise AssertionError(prompt)
     if "Snapshot for datasource 'sqlite' schema 'main'" not in prompt:
+        raise AssertionError(prompt)
+    if "Table Highlights:" not in prompt:
         raise AssertionError(prompt)
 
 
@@ -149,3 +152,48 @@ def test_langgraph_default_middleware_is_built_from_settings(tmp_path: Path) -> 
         raise AssertionError(middleware_names)
     if "ToolCallLimitMiddleware" not in middleware_names:
         raise AssertionError(middleware_names)
+
+
+def test_langgraph_state_seed_includes_dashboard_counts(tmp_path: Path) -> None:
+    """Seed agent state with dashboard-friendly snapshot counts."""
+
+    database_path = tmp_path / "agent-state.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+        )
+        connection.execute(
+            text("CREATE VIEW active_users AS SELECT id, email FROM users")
+        )
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        snapshot = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(snapshot)
+    finally:
+        container.close()
+        engine.dispose()
+
+    state_seed = build_sqldbagent_state_seed(
+        datasource_name="sqlite",
+        settings=settings,
+        schema_name="main",
+    )
+
+    cards = state_seed.get("dashboard_payload", {}).get("cards", [])
+    card_titles = {card["title"]: card["value"] for card in cards}
+    if card_titles.get("Tables") != "1":
+        raise AssertionError(cards)
+    if card_titles.get("Views") != "1":
+        raise AssertionError(cards)

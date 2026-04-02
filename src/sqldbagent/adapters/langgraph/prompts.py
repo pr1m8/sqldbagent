@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from sqldbagent.core.agent_context import build_snapshot_prompt_context
 from sqldbagent.core.config import AppSettings, load_settings
-from sqldbagent.snapshot.service import SnapshotService
 
 
 def create_sqldbagent_system_prompt(
@@ -24,7 +24,7 @@ def create_sqldbagent_system_prompt(
     """
 
     resolved_settings = settings or load_settings()
-    snapshot_context = _load_snapshot_context(
+    snapshot_context = build_snapshot_prompt_context(
         datasource_name=datasource_name,
         settings=resolved_settings,
         schema_name=schema_name,
@@ -57,44 +57,3 @@ def create_sqldbagent_system_prompt(
     if snapshot_context:
         prompt_parts.append(f"STORED SNAPSHOT CONTEXT:\n{snapshot_context}")
     return "\n".join(prompt_parts)
-
-
-def _load_snapshot_context(
-    *,
-    datasource_name: str,
-    settings: AppSettings,
-    schema_name: str | None,
-) -> str | None:
-    """Load stored snapshot summary context for an agent prompt.
-
-    Args:
-        datasource_name: Datasource identifier.
-        settings: Application settings.
-        schema_name: Optional schema focus.
-
-    Returns:
-        str | None: Snapshot summary context when available.
-    """
-
-    if not settings.agent.include_latest_snapshot_context:
-        return None
-
-    try:
-        if schema_name:
-            latest = SnapshotService.load_latest_snapshot(
-                settings.artifacts,
-                datasource_name=datasource_name,
-                schema_name=schema_name,
-            )
-            return latest.summary
-    except FileNotFoundError:
-        return None
-
-    entries = SnapshotService.list_saved_snapshots(
-        settings.artifacts,
-        datasource_name=datasource_name,
-    )[:3]
-    summaries = [entry.summary for entry in entries if entry.summary]
-    if not summaries:
-        return None
-    return "\n".join(f"- {summary}" for summary in summaries)

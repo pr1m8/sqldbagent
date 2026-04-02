@@ -18,12 +18,14 @@ Stable repo memory should capture:
 - docs rule: internal contributor process belongs in `docs/_internal`
 - introspection scope is intentionally large and should grow toward server, database, schema, table, view, constraints, indexes, routines, grants, comments, sizes, and storage metadata
 - snapshot storage is the durable multi-server introspection cache; persisted artifacts should be organized per datasource/schema and loadable later from an index
+- prompt bundles are durable agent artifacts and should be stored beside other per-datasource/schema artifacts with both JSON and Markdown forms
 - retrieval is a helper over stored snapshot documents, not the primary execution path
 - Qdrant is the default retrieval backend for indexed snapshot documents and should be raised with the main integration compose stack
 - datasource aliases are a settings-layer ergonomics feature; persisted artifacts still use canonical datasource names
 - LangChain v1 should be used through our own strict tool surface and LangGraph checkpointers, not via the generic SQL toolkit as the primary execution path
 - local Postgres is the standard agent checkpoint target when persistence is enabled, but it should be treated as separate persistence infrastructure from inspected target databases
 - agent middleware should own dynamic prompting, state seeding, todo handling, tool-error shaping, HITL, and summarization policy
+- FastMCP serving should be settings-driven through `.env` with CLI overrides, not hard-coded transport choices
 - live integration and E2E tests should load datasource config from `.env`, not rely only on raw exported shell variables
 - `langgraph.json` should rely on the local project `pyproject.toml` for dependencies instead of duplicating package names
 

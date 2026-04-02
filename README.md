@@ -50,7 +50,9 @@ Current bootstrap surface includes:
 - SQL guard service for read-only query analysis and row-limit enforcement
 - guarded sync and async query execution
 - snapshot persistence with content hashes, relationship edges, inventory indexing, and diffing
+- prompt persistence with descriptive system prompts, state seeds, and Markdown companions
 - document export from stored snapshots into retrieval-ready bundles
+- diagram export from stored snapshots into Mermaid and graph bundles
 - Qdrant-backed retrieval over stored snapshot documents with cached embeddings
 - LangChain, LangGraph, and FastMCP adapter factories
 - LangGraph agent builders with memory or Postgres-backed checkpointing
@@ -72,10 +74,15 @@ Current bootstrap surface includes:
   - `sqldbagent snapshot list`
   - `sqldbagent snapshot latest`
   - `sqldbagent snapshot diff`
+  - `sqldbagent diagram schema`
+  - `sqldbagent diagram from-snapshot`
   - `sqldbagent docs export`
   - `sqldbagent docs export-from-snapshot`
+  - `sqldbagent prompt export`
+  - `sqldbagent prompt export-from-snapshot`
   - `sqldbagent rag index`
   - `sqldbagent rag query`
+  - `sqldbagent mcp serve`
 - `Makefile` targets for unit, integration, and E2E workflows
 
 Local integration services are intended to be raised with `make up` and stopped
@@ -89,6 +96,10 @@ Saved document exports now live under `var/sqldbagent/documents/<datasource>/<sc
 and retrieval manifests live under `var/sqldbagent/vectorstores/<datasource>/<schema>/`.
 That keeps snapshot documents, cached embeddings, and vector indexing durable and reloadable.
 
+Saved prompt bundles now live under `var/sqldbagent/prompts/<datasource>/<schema>/`.
+Each prompt export persists both a JSON bundle and a Markdown companion so prompt
+context, state seeding, and system-prompt text can be reviewed or reused later.
+
 Retrieval is intentionally an additive helper, not the primary product shape. The core
 workflow is still inspect -> profile -> snapshot -> safe query. Qdrant-backed retrieval
 sits beside that so agents and operators can reuse stored schema context before hitting
@@ -101,6 +112,9 @@ should usually be a separate Postgres instance or database from the inspected da
 `langgraph.json` now points at the local package root, so `langgraph dev` can use
 `pyproject.toml` as the dependency source instead of repeating package names in the
 LangGraph config.
+
+FastMCP serving is also settings-driven now. `sqldbagent mcp serve` defaults to the
+transport and host/port/path values in `.env`, with CLI flags available for overrides.
 
 Datasource aliases can be provided with `SQLDBAGENT_DATASOURCE_ALIASES` as JSON,
 for example `{"demo":"postgres_demo","pg":"postgres"}`. This keeps CLI and

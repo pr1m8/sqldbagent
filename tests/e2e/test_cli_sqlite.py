@@ -168,6 +168,22 @@ def test_cli_inspect_table_with_sqlite_env(
     ):
         raise AssertionError(snapshot_latest_result.output)
 
+    prompt_export_result = runner.invoke(app, ["prompt", "export", "sqlite", "main"])
+    if prompt_export_result.exit_code != 0:
+        raise AssertionError(prompt_export_result.output)
+    prompt_path = Path(prompt_export_result.output.strip())
+    if not prompt_path.exists():
+        raise AssertionError(prompt_path)
+
+    prompt_show_result = runner.invoke(app, ["prompt", "show", str(prompt_path)])
+    if prompt_show_result.exit_code != 0:
+        raise AssertionError(prompt_show_result.output)
+    prompt_output = prompt_show_result.output.replace(" ", "").replace("\n", "")
+    if '"system_prompt":"' not in prompt_output:
+        raise AssertionError(prompt_show_result.output)
+    if '"snapshot_id":"' not in prompt_output:
+        raise AssertionError(prompt_show_result.output)
+
     engine = create_engine(f"sqlite+pysqlite:///{database_path}")
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE users ADD COLUMN team_name TEXT"))

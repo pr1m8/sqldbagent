@@ -7,8 +7,8 @@ from typing import Any
 from sqldbagent.adapters.langgraph.prompts import create_sqldbagent_system_prompt
 from sqldbagent.adapters.langgraph.state import SQLDBAgentState
 from sqldbagent.adapters.shared import require_dependency
+from sqldbagent.core.agent_context import build_sqldbagent_state_seed
 from sqldbagent.core.config import AppSettings, load_settings
-from sqldbagent.snapshot.service import SnapshotService
 
 
 def create_sqldbagent_middleware(
@@ -120,61 +120,11 @@ def create_sqldbagent_state_middleware(
 
     @middleware_module.before_agent(state_schema=SQLDBAgentState)
     def sqldbagent_state_seed(_state: SQLDBAgentState, _runtime: Any) -> dict[str, Any]:
-        snapshot_id = None
-        snapshot_summary = None
-        try:
-            if schema_name:
-                latest = SnapshotService.load_latest_snapshot(
-                    resolved_settings.artifacts,
-                    datasource_name=datasource_name,
-                    schema_name=schema_name,
-                )
-                snapshot_id = latest.snapshot_id
-                snapshot_summary = latest.summary
-            else:
-                entries = SnapshotService.list_saved_snapshots(
-                    resolved_settings.artifacts,
-                    datasource_name=datasource_name,
-                )
-                if entries:
-                    snapshot_id = entries[0].snapshot_id
-                    snapshot_summary = entries[0].summary
-        except FileNotFoundError:
-            pass
-
-        dashboard_payload = {
-            "headline": f"{datasource_name}:{schema_name or 'default'}",
-            "cards": [
-                {
-                    "title": "Datasource",
-                    "value": datasource_name,
-                    "kind": "identity",
-                },
-                {
-                    "title": "Schema",
-                    "value": schema_name or "all-visible",
-                    "kind": "scope",
-                },
-                {
-                    "title": "Snapshot",
-                    "value": snapshot_id or "none",
-                    "kind": "artifact",
-                },
-            ],
-            "notes": [
-                "Use inspection and profiling before SQL.",
-                "Treat safe_query_sql as guarded read-only access.",
-                "Prefer reusable summaries that can feed docs and dashboard views.",
-            ],
-        }
-        return {
-            "datasource_name": datasource_name,
-            "schema_name": schema_name,
-            "latest_snapshot_id": snapshot_id,
-            "latest_snapshot_summary": snapshot_summary,
-            "dashboard_payload": dashboard_payload,
-            "tool_call_digest": [],
-        }
+        return build_sqldbagent_state_seed(
+            datasource_name=datasource_name,
+            settings=resolved_settings,
+            schema_name=schema_name,
+        )
 
     return sqldbagent_state_seed
 

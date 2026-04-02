@@ -16,6 +16,7 @@ from sqldbagent.engines.factory import DatasourceRegistry, EngineManager
 from sqldbagent.introspect.base import InspectionService
 from sqldbagent.introspect.service import SQLAlchemyInspectionService
 from sqldbagent.profile.service import SQLAlchemyProfilingService
+from sqldbagent.prompts.service import SnapshotPromptService
 from sqldbagent.retrieval.service import SnapshotRetrievalService
 from sqldbagent.safety.execution import SafeQueryService
 from sqldbagent.safety.guard import QueryGuardService
@@ -34,6 +35,7 @@ class ServiceContainer:
         snapshotter: Shared snapshot persistence service.
         diagram_service: Shared schema diagram export service.
         document_service: Shared snapshot document-export service.
+        prompt_service: Shared prompt-export service.
         retrieval_service: Shared retrieval service over stored snapshot documents.
         engine: Optional SQLAlchemy engine owned by the container.
         async_engine: Optional async SQLAlchemy engine owned by the container.
@@ -46,6 +48,7 @@ class ServiceContainer:
     snapshotter: SnapshotService | None = None
     diagram_service: SchemaDiagramService | None = None
     document_service: SnapshotDocumentService | None = None
+    prompt_service: SnapshotPromptService | None = None
     retrieval_service: SnapshotRetrievalService | None = None
     engine: Engine | None = None
     async_engine: AsyncEngine | None = None
@@ -119,6 +122,10 @@ def build_service_container(
     )
     diagram_service = SchemaDiagramService(artifacts=resolved_settings.artifacts)
     document_service = SnapshotDocumentService(artifacts=resolved_settings.artifacts)
+    prompt_service = SnapshotPromptService(
+        artifacts=resolved_settings.artifacts,
+        settings=resolved_settings,
+    )
     try:
         require_dependency("langchain_qdrant", "langchain-qdrant")
         require_dependency("qdrant_client", "qdrant-client")
@@ -144,6 +151,7 @@ def build_service_container(
         snapshotter=snapshotter,
         diagram_service=diagram_service,
         document_service=document_service,
+        prompt_service=prompt_service,
         retrieval_service=retrieval_service,
         engine=engine,
         async_engine=async_engine,

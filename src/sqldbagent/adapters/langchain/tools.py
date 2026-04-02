@@ -138,6 +138,16 @@ class GenerateMermaidErdInput(BaseModel):
     schema_name: str
 
 
+class ExportPromptContextInput(BaseModel):
+    """Input for prompt export.
+
+    Attributes:
+        schema_name: Schema whose latest saved snapshot should become a prompt bundle.
+    """
+
+    schema_name: str
+
+
 class IndexSchemaDocumentsInput(BaseModel):
     """Input for retrieval indexing.
 
@@ -385,6 +395,30 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 name="export_schema_documents",
                 description="Export retrieval-ready documents from the latest saved schema snapshot.",
                 args_schema=ExportSchemaDocumentsInput,
+            )
+        )
+
+    if services.prompt_service is not None and services.snapshotter is not None:
+
+        def export_prompt_context(schema_name: str) -> dict[str, Any]:
+            bundle = services.snapshotter.load_latest_saved_snapshot(schema_name)
+            prompt_bundle = services.prompt_service.create_prompt_bundle(bundle)
+            path = services.prompt_service.save_prompt_bundle(prompt_bundle)
+            payload = prompt_bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            payload["markdown_path"] = services.prompt_service.markdown_path(
+                datasource_name=prompt_bundle.datasource_name,
+                schema_name=prompt_bundle.schema_name,
+                snapshot_id=prompt_bundle.snapshot_id,
+            ).as_posix()
+            return payload
+
+        tools.append(
+            structured_tool.from_function(
+                func=export_prompt_context,
+                name="export_prompt_context",
+                description="Export a durable prompt bundle from the latest saved schema snapshot.",
+                args_schema=ExportPromptContextInput,
             )
         )
 
