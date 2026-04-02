@@ -37,6 +37,8 @@ class ServiceContainer:
         document_service: Shared snapshot document-export service.
         prompt_service: Shared prompt-export service.
         retrieval_service: Shared retrieval service over stored snapshot documents.
+        datasource_name: Canonical datasource name backing the container.
+        settings: Application settings that built the container.
         engine: Optional SQLAlchemy engine owned by the container.
         async_engine: Optional async SQLAlchemy engine owned by the container.
     """
@@ -50,6 +52,8 @@ class ServiceContainer:
     document_service: SnapshotDocumentService | None = None
     prompt_service: SnapshotPromptService | None = None
     retrieval_service: SnapshotRetrievalService | None = None
+    datasource_name: str | None = None
+    settings: AppSettings | None = None
     engine: Engine | None = None
     async_engine: AsyncEngine | None = None
 
@@ -153,6 +157,8 @@ def build_service_container(
         document_service=document_service,
         prompt_service=prompt_service,
         retrieval_service=retrieval_service,
+        datasource_name=canonical_datasource_name,
+        settings=resolved_settings,
         engine=engine,
         async_engine=async_engine,
     )
