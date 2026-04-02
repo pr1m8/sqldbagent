@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ from sqldbagent.adapters.langgraph.memory import (
 )
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer
+from sqldbagent.prompts.exploration import PromptExplorationService
 
 ToolRuntime = Any
 
@@ -111,10 +112,13 @@ class SafeQuerySqlInput(BaseModel):
     Attributes:
         sql: SQL text to guard and execute.
         max_rows: Optional row-limit override.
+        access_mode: Execution mode. Defaults to `read_only`. Writable access
+            only works when the datasource policy enables it explicitly.
     """
 
     sql: str
     max_rows: int | None = Field(default=None, ge=1)
+    access_mode: Literal["read_only", "writable"] = Field(default="read_only")
 
 
 class CreateSnapshotInput(BaseModel):
@@ -171,6 +175,26 @@ class ExportPromptContextInput(BaseModel):
     schema_name: str
 
 
+class ExplorePromptContextInput(BaseModel):
+    """Input for live prompt-context exploration.
+
+    Attributes:
+        schema_name: Optional schema scope. Uses runtime state when omitted.
+        table_names: Optional explicit table focus list.
+        max_tables: Maximum number of tables to explore.
+        unique_value_limit: Maximum number of distinct values per column.
+        sync_memory: Whether to also save a concise summary into long-term memory.
+        create_snapshot_if_missing: Whether to create a snapshot first if one is missing.
+    """
+
+    schema_name: str | None = Field(default=None)
+    table_names: list[str] | None = Field(default=None)
+    max_tables: int = Field(default=4, ge=1, le=6)
+    unique_value_limit: int = Field(default=8, ge=2, le=20)
+    sync_memory: bool = True
+    create_snapshot_if_missing: bool = True
+
+
 class IndexSchemaDocumentsInput(BaseModel):
     """Input for retrieval indexing.
 
@@ -221,6 +245,33 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     tools: list[Any] = []
     settings = services.settings
     datasource_name = services.datasource_name
+    datasource = (
+        None
+        if settings is None or datasource_name is None
+        else settings.get_datasource(datasource_name)
+    )
+    dialect_name = "unknown" if datasource is None else datasource.dialect.value
+    writable_supported = bool(datasource is not None and datasource.safety.allow_writes)
+    async_supported = services.async_engine is not None
+
+    def _runtime_context_payload(schema_name: str | None = None) -> dict[str, Any]:
+        return {
+            "datasource_name": datasource_name,
+            "dialect": dialect_name,
+            "schema_name": schema_name,
+            "default_access_mode": "read_only",
+            "writable_supported": writable_supported,
+            "async_query_supported": async_supported,
+            "statement_timeout_seconds": (
+                None
+                if datasource is None
+                else datasource.safety.statement_timeout_seconds
+            ),
+            "max_rows": None if datasource is None else datasource.safety.max_rows,
+            "allowed_schemas": (
+                [] if datasource is None else datasource.safety.allowed_schemas
+            ),
+        }
 
     def _active_schema_name(runtime: Any) -> str | None:
         state = getattr(runtime, "state", {}) or {}
@@ -258,36 +309,54 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             structured_tool.from_function(
                 func=list_databases,
                 name="list_databases",
-                description="List databases visible to the configured datasource.",
+                description=(
+                    f"List databases visible to datasource '{datasource_name}' "
+                    f"(dialect={dialect_name})."
+                ),
             ),
             structured_tool.from_function(
                 func=list_schemas,
                 name="list_schemas",
-                description="List schemas for an optional database.",
+                description=(
+                    f"List schemas for an optional database in the active "
+                    f"{dialect_name} datasource."
+                ),
                 args_schema=ListSchemasInput,
             ),
             structured_tool.from_function(
                 func=list_tables,
                 name="list_tables",
-                description="List tables for an optional schema.",
+                description=(
+                    f"List tables for an optional schema in the active "
+                    f"{dialect_name} datasource."
+                ),
                 args_schema=ListTablesInput,
             ),
             structured_tool.from_function(
                 func=list_views,
                 name="list_views",
-                description="List views for an optional schema.",
+                description=(
+                    f"List views for an optional schema in the active "
+                    f"{dialect_name} datasource."
+                ),
                 args_schema=ListTablesInput,
             ),
             structured_tool.from_function(
                 func=describe_table,
                 name="describe_table",
-                description="Return normalized metadata for a table.",
+                description=(
+                    f"Return normalized metadata for a table in the active "
+                    f"{dialect_name} datasource."
+                ),
                 args_schema=DescribeTableInput,
             ),
             structured_tool.from_function(
                 func=describe_view,
                 name="describe_view",
-                description="Return normalized metadata for a view.",
+                description=(
+                    f"Return normalized metadata for a view in the active "
+                    f"{dialect_name} datasource."
+                ),
                 args_schema=DescribeViewInput,
             ),
         ]
@@ -335,19 +404,28 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 structured_tool.from_function(
                     func=profile_table,
                     name="profile_table",
-                    description="Build a normalized profile for a table.",
+                    description=(
+                        f"Build a normalized profile for a table in the active "
+                        f"{dialect_name} datasource."
+                    ),
                     args_schema=ProfileTableInput,
                 ),
                 structured_tool.from_function(
                     func=sample_table,
                     name="sample_table",
-                    description="Return sample rows for a table.",
+                    description=(
+                        f"Return sample rows for a table in the active "
+                        f"{dialect_name} datasource."
+                    ),
                     args_schema=SampleTableInput,
                 ),
                 structured_tool.from_function(
                     func=get_unique_values,
                     name="get_unique_values",
-                    description="Return distinct values and counts for one column.",
+                    description=(
+                        "Return distinct values and counts for one column, useful "
+                        "for filters, grouping, and prompt grounding."
+                    ),
                     args_schema=GetUniqueValuesInput,
                 ),
             ]
@@ -398,33 +476,43 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
         def safe_query_sql(
             sql: str,
             max_rows: int | None = None,
+            access_mode: Literal["read_only", "writable"] = "read_only",
         ) -> dict[str, Any]:
             lint = services.query_guard.lint(sql)
             result = services.query_service.run(
                 sql=sql,
                 max_rows=max_rows,
+                access_mode=access_mode,
             ).model_dump(mode="json")
             result["lint"] = lint.model_dump(mode="json")
+            result["runtime_context"] = _runtime_context_payload()
             return result
 
         async def safe_query_sql_async(
             sql: str,
             max_rows: int | None = None,
+            access_mode: Literal["read_only", "writable"] = "read_only",
         ) -> dict[str, Any]:
             lint = services.query_guard.lint(sql)
             result = (
                 await services.query_service.run_async(
                     sql=sql,
                     max_rows=max_rows,
+                    access_mode=access_mode,
                 )
             ).model_dump(mode="json")
             result["lint"] = lint.model_dump(mode="json")
+            result["runtime_context"] = _runtime_context_payload()
             return result
 
         tool_kwargs: dict[str, Any] = {
             "func": safe_query_sql,
             "name": "safe_query_sql",
-            "description": "Lint, guard, and execute read-only SQL with policy enforcement.",
+            "description": (
+                f"Lint, guard, and execute SQL for the active {dialect_name} datasource. "
+                "Default to access_mode='read_only'. Writable execution must be "
+                "requested explicitly and only works when the datasource policy enables writes."
+            ),
             "args_schema": SafeQuerySqlInput,
         }
         if services.async_engine is not None:
@@ -463,6 +551,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 schema_name=prompt_bundle.schema_name,
                 snapshot_id=prompt_bundle.snapshot_id,
             ).as_posix()
+            payload["token_budget"] = prompt_bundle.token_estimates
             return payload
 
         tools.append(
@@ -473,6 +562,87 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 args_schema=ExportPromptContextInput,
             )
         )
+
+        @tool("explore_and_save_prompt_context", parse_docstring=True)
+        def explore_and_save_prompt_context_tool(
+            schema_name: str | None = None,
+            table_names: list[str] | None = None,
+            max_tables: int = 4,
+            unique_value_limit: int = 8,
+            sync_memory: bool = True,
+            create_snapshot_if_missing: bool = True,
+            runtime: ToolRuntime | None = None,
+        ) -> dict[str, Any]:
+            """Run live read-only exploration and save the result into the prompt.
+
+            Args:
+                schema_name: Optional schema scope. Uses runtime state when omitted.
+                table_names: Optional explicit table focus list.
+                max_tables: Maximum number of tables to explore.
+                unique_value_limit: Maximum number of distinct values per column.
+                sync_memory: Whether to also sync a concise summary into long-term memory.
+                create_snapshot_if_missing: Whether to create a snapshot first if none exists.
+                runtime: LangChain tool runtime with access to state and store.
+
+            Returns:
+                dict[str, Any]: Updated prompt bundle payload plus runtime context.
+            """
+
+            resolved_schema_name = schema_name or _active_schema_name(runtime)
+            if resolved_schema_name is None:
+                raise ValueError(
+                    "schema_name is required when the active runtime state has no schema."
+                )
+            try:
+                snapshot = services.snapshotter.load_latest_saved_snapshot(
+                    resolved_schema_name
+                )
+            except FileNotFoundError:
+                if not create_snapshot_if_missing:
+                    raise
+                snapshot = services.snapshotter.create_schema_snapshot(
+                    schema_name=resolved_schema_name,
+                    sample_size=services.settings.profiling.default_sample_size,
+                )
+                services.snapshotter.save_snapshot(snapshot)
+
+            if services.profiler is None:
+                raise ValueError("live prompt exploration requires profiling support")
+            exploration = PromptExplorationService().create_exploration(
+                snapshot,
+                profiler=services.profiler,
+                table_names=table_names,
+                max_tables=max_tables,
+                unique_value_limit=unique_value_limit,
+            )
+            enhancement = services.prompt_service.save_prompt_exploration(
+                snapshot,
+                exploration=exploration,
+            )
+            if sync_memory:
+                remember_database_context(
+                    getattr(runtime, "store", None),
+                    settings=settings,
+                    datasource_name=datasource_name,
+                    schema_name=resolved_schema_name,
+                    notes=[exploration.summary or "Saved live prompt exploration."],
+                    preferred_tables=exploration.focus_tables,
+                    merge=True,
+                )
+            prompt_bundle = services.prompt_service.create_prompt_bundle(
+                snapshot,
+                enhancement=enhancement,
+            )
+            path = services.prompt_service.save_prompt_bundle(prompt_bundle)
+            payload = prompt_bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            payload["token_budget"] = prompt_bundle.token_estimates
+            payload["runtime_context"] = _runtime_context_payload(
+                schema_name=resolved_schema_name
+            )
+            return payload
+
+        tools.append(explore_and_save_prompt_context_tool)
 
     if services.diagram_service is not None and services.snapshotter is not None:
 
@@ -550,6 +720,21 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
 
     if settings is not None and datasource_name is not None:
 
+        @tool("get_runtime_context", parse_docstring=True)
+        def get_runtime_context_tool(runtime: ToolRuntime) -> dict[str, Any]:
+            """Return datasource, dialect, schema, and access-policy context.
+
+            Args:
+                runtime: LangChain tool runtime with access to the active state.
+
+            Returns:
+                dict[str, Any]: Runtime context for dialect-aware planning.
+            """
+
+            return _runtime_context_payload(
+                schema_name=_active_schema_name(runtime),
+            )
+
         @tool("load_database_memory", parse_docstring=True)
         def load_database_memory_tool(runtime: ToolRuntime) -> dict[str, Any]:
             """Load the remembered datasource/schema context for the active agent.
@@ -570,6 +755,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             if record is None:
                 return {
                     "datasource_name": datasource_name,
+                    "dialect": dialect_name,
                     "summary": "No remembered database context is stored yet.",
                 }
             return record.model_dump(mode="json")
@@ -608,6 +794,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             if record is None:
                 return {
                     "datasource_name": datasource_name,
+                    "dialect": dialect_name,
                     "summary": "No long-term store is configured for this agent run.",
                 }
             return record.model_dump(mode="json")
@@ -656,11 +843,14 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                     return {
                         "datasource_name": datasource_name,
                         "schema_name": schema_name,
+                        "dialect": dialect_name,
                         "summary": "No long-term store is configured for this agent run.",
                     }
                 return record.model_dump(mode="json")
 
             tools.append(sync_database_memory_tool)
+
+        tools.append(get_runtime_context_tool)
 
         tools.extend([load_database_memory_tool, remember_database_context_tool])
 
