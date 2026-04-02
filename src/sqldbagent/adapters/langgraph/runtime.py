@@ -9,6 +9,10 @@ from typing import Any
 from sqldbagent.adapters.langgraph.agent import create_sqldbagent_agent
 from sqldbagent.adapters.langgraph.checkpoint import create_sync_postgres_checkpointer
 from sqldbagent.adapters.langgraph.model import create_runtime_chat_model
+from sqldbagent.adapters.langgraph.store import (
+    create_memory_store,
+    create_sync_postgres_store,
+)
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer, build_service_container
 from sqldbagent.core.config import AppSettings, load_settings
@@ -38,6 +42,7 @@ def create_runtime_agent(settings: AppSettings | None = None) -> Any:
         include_async_engine=False,
     )
     checkpointer = None
+    store = None
     if (
         resolved_settings.agent.checkpoint.backend == "postgres"
         and resolved_settings.agent.checkpoint.postgres_url is not None
@@ -45,6 +50,15 @@ def create_runtime_agent(settings: AppSettings | None = None) -> Any:
         checkpointer = _RESOURCE_STACK.enter_context(
             create_sync_postgres_checkpointer(settings=resolved_settings)
         )
+    if (
+        resolved_settings.agent.memory.backend == "postgres"
+        and resolved_settings.agent.memory.postgres_url is not None
+    ):
+        store = _RESOURCE_STACK.enter_context(
+            create_sync_postgres_store(settings=resolved_settings)
+        )
+    elif resolved_settings.agent.memory.backend != "disabled":
+        store = create_memory_store()
     return create_sqldbagent_agent(
         services=_RUNTIME_CONTAINER,
         model=_build_runtime_model(resolved_settings),
@@ -52,6 +66,7 @@ def create_runtime_agent(settings: AppSettings | None = None) -> Any:
         settings=resolved_settings,
         schema_name=schema_name,
         checkpointer=checkpointer,
+        store=store,
     )
 
 
