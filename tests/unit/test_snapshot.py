@@ -4,7 +4,8 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-from sqldbagent.core.config import ArtifactSettings
+from sqldbagent.core.bootstrap import build_service_container
+from sqldbagent.core.config import AppSettings, ArtifactSettings
 from sqldbagent.introspect.service import SQLAlchemyInspectionService
 from sqldbagent.profile.service import SQLAlchemyProfilingService
 from sqldbagent.snapshot.service import SnapshotService
@@ -101,3 +102,37 @@ def test_snapshot_service_diffs_snapshots(tmp_path: Path) -> None:
         raise AssertionError(diff.changed_tables)
     if diff.changed_tables[0].added_columns != ["team_id"]:
         raise AssertionError(diff.changed_tables[0])
+
+
+def test_snapshot_service_uses_canonical_datasource_name_for_aliases(
+    tmp_path: Path,
+) -> None:
+    """Persist aliased datasource artifacts under the canonical datasource name."""
+
+    database_path = tmp_path / "alias-snapshot.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)")
+        )
+        connection.execute(
+            text("INSERT INTO users (id, email) VALUES (1, 'a@example.com')")
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        sqlite_path=str(database_path),
+        datasource_aliases={"demo": "sqlite"},
+        artifacts=ArtifactSettings(root_dir=str(tmp_path), snapshots_dir="snapshots"),
+    )
+    container = build_service_container("demo", settings=settings)
+    try:
+        bundle = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        path = container.snapshotter.save_snapshot(bundle)
+    finally:
+        container.close()
+
+    if bundle.datasource_name != "sqlite":
+        raise AssertionError(bundle.datasource_name)
+    if path.parts[-3] != "sqlite":
+        raise AssertionError(path)
