@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sqldbagent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sqldbagent}
+      POSTGRES_USER: ${POSTGRES_USER:-sqldbagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sqldbagent}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --lc-collate=C --lc-ctype=C
+    ports:
+      - ${POSTGRES_PORT:-5432}:5432
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pg_isready -U ${POSTGRES_USER:-sqldbagent} -d ${POSTGRES_DB:-sqldbagent}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  postgres_demo:
+    image: postgres:16
+    container_name: sqldbagent-postgres-demo
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DEMO_DB:-sqldbagent_demo}
+      POSTGRES_USER: ${POSTGRES_DEMO_USER:-sqldbagent}
+      POSTGRES_PASSWORD: ${POSTGRES_DEMO_PASSWORD:-sqldbagent}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --lc-collate=C --lc-ctype=C
+    ports:
+      - ${POSTGRES_DEMO_PORT:-5433}:5432
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pg_isready -U ${POSTGRES_DEMO_USER:-sqldbagent} -d ${POSTGRES_DEMO_DB:-sqldbagent_demo}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_demo_data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.3
+    container_name: sqldbagent-qdrant
+    restart: unless-stopped
+    ports:
+      - ${QDRANT_PORT:-6333}:6333
+      - ${QDRANT_GRPC_PORT:-6334}:6334
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqldbagent-mssql
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_PID: Developer
+      SA_PASSWORD: ${MSSQL_PASSWORD:-YourStrong!Passw0rd}
+    ports:
+      - ${MSSQL_PORT:-1433}:1433
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${MSSQL_PASSWORD:-YourStrong!Passw0rd}' -C -Q 'SELECT 1' || exit 1"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - mssql_data:/var/opt/mssql
+
+volumes:
+  postgres_data:
+  postgres_demo_data:
+  qdrant_data:
+  mssql_data:
