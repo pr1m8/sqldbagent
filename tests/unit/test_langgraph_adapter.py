@@ -110,6 +110,9 @@ def test_langgraph_system_prompt_merges_saved_prompt_enhancement(
             active=True,
             user_context="Customers are tenants and invoices reflect subscription billing.",
             business_rules="Treat amount_cents as the authoritative revenue field.",
+            additional_effective_context=(
+                "If a result depends on inference, label it explicitly as an inference."
+            ),
             answer_style="Prefer concise bullets with explicit evidence.",
             refresh_generated=True,
         )
@@ -128,6 +131,10 @@ def test_langgraph_system_prompt_merges_saved_prompt_enhancement(
     if "subscription billing" not in prompt:
         raise AssertionError(prompt)
     if "authoritative revenue field" not in prompt:
+        raise AssertionError(prompt)
+    if "ADDITIONAL EFFECTIVE PROMPT CONTEXT:" not in prompt:
+        raise AssertionError(prompt)
+    if "label it explicitly as an inference" not in prompt:
         raise AssertionError(prompt)
 
 

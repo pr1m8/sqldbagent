@@ -180,6 +180,10 @@ def test_prompt_service_updates_prompt_enhancement_context(tmp_path: Path) -> No
             active=True,
             user_context="Customers represent paying tenants and tiers map to billing plans.",
             business_rules="Do not treat archived tenants as churn unless cancelled_at is set.",
+            additional_effective_context=(
+                "Always mention whether the answer came from snapshot artifacts, "
+                "retrieval, or guarded live SQL."
+            ),
             answer_style="Prefer short summaries followed by table-level evidence.",
             refresh_generated=True,
         )
@@ -197,7 +201,13 @@ def test_prompt_service_updates_prompt_enhancement_context(tmp_path: Path) -> No
         raise AssertionError(prompt_bundle.model_dump())
     if "paying tenants" not in prompt_bundle.system_prompt:
         raise AssertionError(prompt_bundle.system_prompt)
+    if "ADDITIONAL EFFECTIVE PROMPT CONTEXT:" not in prompt_bundle.system_prompt:
+        raise AssertionError(prompt_bundle.system_prompt)
+    if "guarded live SQL" not in prompt_bundle.system_prompt:
+        raise AssertionError(prompt_bundle.system_prompt)
     if "paying tenants" in prompt_bundle.base_system_prompt:
         raise AssertionError(prompt_bundle.base_system_prompt)
+    if prompt_bundle.enhancement.additional_effective_context is None:
+        raise AssertionError(prompt_bundle.enhancement.model_dump())
     if "Entity priorities:" not in prompt_bundle.enhancement.generated_context:
         raise AssertionError(prompt_bundle.enhancement.generated_context)
