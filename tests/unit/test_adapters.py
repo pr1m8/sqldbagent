@@ -3,6 +3,7 @@
 import asyncio
 from importlib.util import find_spec
 
+import orjson
 from sqlalchemy import create_engine, text
 
 from sqldbagent.adapters.langchain import (
@@ -184,6 +185,11 @@ def test_mcp_server_registers_tools_prompts_and_resources() -> None:
         raise AssertionError(prompts)
     if len(resources) < 2:
         raise AssertionError(resources)
+
+    capabilities = asyncio.run(server.read_resource("sqldbagent://capabilities"))
+    capabilities_payload = orjson.loads(capabilities.contents[0].content)
+    if "list_tables" not in capabilities_payload.get("tools", []):
+        raise AssertionError(capabilities_payload)
 
 
 def test_langchain_sql_database_can_reflect_sqlite_engine() -> None:
