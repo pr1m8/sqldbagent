@@ -1,7 +1,8 @@
 # sqldbagent
 
 [![CI](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml)
-[![Docs](https://github.com/pr1m8/sqldbagent/actions/workflows/docs.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/docs.yml)
+[![PyPI](https://img.shields.io/pypi/v/sqldbagent.svg)](https://pypi.org/project/sqldbagent/)
+[![Docs](https://readthedocs.org/projects/sqldbagent/badge/?version=latest)](https://sqldbagent.readthedocs.io/en/latest/)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-0f766e.svg)](https://www.python.org/downloads/)
 [![PDM](https://img.shields.io/badge/deps-pdm-334155.svg)](https://pdm-project.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-115e59.svg)](LICENSE)
@@ -95,14 +96,14 @@ sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph r
 
 ## Documentation
 
-Public docs live in [`docs/source`](docs/source), internal repo memory lives in [`docs/_internal`](docs/_internal), and the main contributor rules live in [`AGENTS.md`](AGENTS.md).
+Public docs live at [sqldbagent.readthedocs.io](https://sqldbagent.readthedocs.io/en/latest/), internal repo memory lives in [`docs/_internal`](docs/_internal), and the main contributor rules live in [`AGENTS.md`](AGENTS.md).
 
 Useful entrypoints:
 
-- [Getting Started](docs/source/getting-started.md)
-- [Configuration](docs/source/configuration.md)
-- [Agent Stack](docs/source/agent-stack.md)
-- [Publishing](docs/source/publishing.md)
+- [Getting Started](https://sqldbagent.readthedocs.io/en/latest/getting-started.html)
+- [Configuration](https://sqldbagent.readthedocs.io/en/latest/configuration.html)
+- [Agent Stack](https://sqldbagent.readthedocs.io/en/latest/agent-stack.html)
+- [Publishing](https://sqldbagent.readthedocs.io/en/latest/publishing.html)
 
 Build docs locally:
 

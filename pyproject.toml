@@ -1,6 +1,6 @@
 [project]
 name = "sqldbagent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Service-first database intelligence platform for safe inspection and agent-ready exports"
 keywords = [
   "sql",
@@ -48,7 +48,7 @@ text = "MIT"
 Homepage = "https://github.com/pr1m8/sqldbagent"
 Repository = "https://github.com/pr1m8/sqldbagent"
 Issues = "https://github.com/pr1m8/sqldbagent/issues"
-Documentation = "https://github.com/pr1m8/sqldbagent/tree/main/docs"
+Documentation = "https://sqldbagent.readthedocs.io/en/latest/"
 
 [project.scripts]
 sqldbagent = "sqldbagent.cli.app:app"
@@ -124,7 +124,7 @@ distribution = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.1.0"
+version = "0.1.1"
 tag_format = "v$version"
 update_changelog_on_bump = false
 version_files = ["pyproject.toml:version"]
