@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqldbagent.core.config import AgentCheckpointSettings, AgentSettings, AppSettings
 from sqldbagent.dashboard.app import (
     _build_checkpoint_status,
+    _build_mermaid_embed,
+    _format_thread_label,
     _resolve_dashboard_checkpointer,
 )
+from sqldbagent.dashboard.models import DashboardThreadEntryModel
 
 
 def test_resolve_dashboard_checkpointer_reuses_session_memory_saver() -> None:
@@ -61,3 +66,37 @@ def test_build_checkpoint_status_reflects_backend() -> None:
         raise AssertionError(memory_status)
     if "Postgres" not in postgres_status:
         raise AssertionError(postgres_status)
+
+
+def test_build_mermaid_embed_contains_runtime_markup() -> None:
+    """Embed Mermaid markup into the Streamlit component HTML payload."""
+
+    payload = _build_mermaid_embed("flowchart LR\nA --> B")
+
+    if "cdn.jsdelivr.net/npm/mermaid@11" not in payload:
+        raise AssertionError(payload)
+    if "flowchart LR" not in payload:
+        raise AssertionError(payload)
+
+
+def test_format_thread_label_uses_preview_and_timestamp() -> None:
+    """Build a readable selector label for saved dashboard threads."""
+
+    entry = DashboardThreadEntryModel(
+        thread_id="thread-12345678",
+        datasource_name="postgres_demo",
+        schema_name="public",
+        updated_at=datetime(2026, 4, 2, 10, 0, tzinfo=UTC),
+        last_user_message="List the public tables and highlight key relationships.",
+    )
+
+    label = _format_thread_label(
+        entry,
+        current_thread_id="other-thread",
+        thread_id=entry.thread_id,
+    )
+
+    if "List the public tables" not in label:
+        raise AssertionError(label)
+    if "[public]" not in label:
+        raise AssertionError(label)

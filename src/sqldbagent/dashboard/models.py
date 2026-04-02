@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from pydantic import BaseModel, Field
+
+from sqldbagent.diagrams.models import DiagramBundleModel
+from sqldbagent.prompts.models import PromptBundleModel
 
 
 class ChatMessageModel(BaseModel):
@@ -23,6 +28,32 @@ class ChatMessageModel(BaseModel):
     status: str | None = None
 
 
+class DashboardThreadEntryModel(BaseModel):
+    """Persisted dashboard thread summary used for thread selection.
+
+    Attributes:
+        thread_id: Stable thread identifier used by the LangGraph checkpointer.
+        datasource_name: Datasource identifier associated with the thread.
+        schema_name: Optional schema focus for the thread.
+        created_at: First time the thread was observed by the dashboard.
+        updated_at: Most recent time the dashboard refreshed the thread entry.
+        message_count: Number of rendered transcript messages currently known.
+        latest_snapshot_id: Latest snapshot bound into the thread state, if any.
+        last_user_message: Most recent user message preview.
+        last_assistant_message: Most recent assistant message preview.
+    """
+
+    thread_id: str
+    datasource_name: str
+    schema_name: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    message_count: int = 0
+    latest_snapshot_id: str | None = None
+    last_user_message: str | None = None
+    last_assistant_message: str | None = None
+
+
 class ChatSessionModel(BaseModel):
     """Dashboard-ready snapshot of one agent conversation thread.
 
@@ -36,6 +67,9 @@ class ChatSessionModel(BaseModel):
         latest_snapshot_id: Latest known stored snapshot id.
         latest_snapshot_summary: Latest known stored snapshot summary.
         tool_call_digest: Compressed tool-call history from the agent state.
+        diagram_bundle: Stored schema-diagram bundle associated with the session.
+        prompt_bundle: Stored prompt bundle associated with the session.
+        available_threads: Persisted dashboard thread summaries for selection.
     """
 
     thread_id: str
@@ -47,3 +81,6 @@ class ChatSessionModel(BaseModel):
     latest_snapshot_id: str | None = None
     latest_snapshot_summary: str | None = None
     tool_call_digest: list[str] = Field(default_factory=list)
+    diagram_bundle: DiagramBundleModel | None = None
+    prompt_bundle: PromptBundleModel | None = None
+    available_threads: list[DashboardThreadEntryModel] = Field(default_factory=list)

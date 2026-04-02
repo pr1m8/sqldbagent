@@ -48,7 +48,7 @@ That means:
 - Qdrant-backed retrieval over stored snapshot documents
 - LangChain tools and LangGraph agent builders with middleware, checkpointing, and optional LangSmith tracing
 - FastMCP server surface
-- Streamlit dashboard chat surface over the same persisted agent stack
+- Streamlit dashboard chat surface with chat, schema diagram, prompt review, and saved-thread reuse over the same persisted agent stack
 
 ## Install
 
@@ -81,6 +81,13 @@ pdm run sqldbagent snapshot create postgres_demo public
 pdm run sqldbagent prompt export postgres_demo public
 make dashboard-demo
 ```
+
+The dashboard includes:
+
+- a persisted chat tab over the guarded agent stack
+- a schema tab that renders the latest stored Mermaid ER diagram
+- a prompt tab for reviewing the latest stored system prompt and state seed
+- a threads tab plus sidebar selector for reopening saved conversations
 
 ## Agent Stack
 
