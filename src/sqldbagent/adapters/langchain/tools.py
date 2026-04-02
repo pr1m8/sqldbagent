@@ -94,11 +94,45 @@ class SafeQuerySqlInput(BaseModel):
     max_rows: int | None = Field(default=None, ge=1)
 
 
+class CreateSnapshotInput(BaseModel):
+    """Input for snapshot creation.
+
+    Attributes:
+        schema_name: Schema to snapshot.
+        sample_size: Number of sample rows per profiled table.
+    """
+
+    schema_name: str
+    sample_size: int = Field(default=5, ge=1)
+
+
+class DiffSnapshotsInput(BaseModel):
+    """Input for snapshot diffing.
+
+    Attributes:
+        left_path: Baseline snapshot path.
+        right_path: Comparison snapshot path.
+    """
+
+    left_path: str
+    right_path: str
+
+
 class ExportSchemaDocumentsInput(BaseModel):
     """Input for snapshot document export.
 
     Attributes:
         schema_name: Schema to export from the latest saved snapshot.
+    """
+
+    schema_name: str
+
+
+class GenerateMermaidErdInput(BaseModel):
+    """Input for schema diagram generation.
+
+    Attributes:
+        schema_name: Schema whose latest saved snapshot should be visualized.
     """
 
     schema_name: str
@@ -257,6 +291,46 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             ]
         )
 
+    if services.snapshotter is not None:
+
+        def create_snapshot(
+            schema_name: str,
+            sample_size: int = 5,
+        ) -> dict[str, Any]:
+            bundle = services.snapshotter.create_schema_snapshot(
+                schema_name=schema_name,
+                sample_size=sample_size,
+            )
+            path = services.snapshotter.save_snapshot(bundle)
+            payload = bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            return payload
+
+        def diff_snapshots(left_path: str, right_path: str) -> dict[str, Any]:
+            left_bundle = services.snapshotter.load_snapshot(left_path)
+            right_bundle = services.snapshotter.load_snapshot(right_path)
+            return services.snapshotter.diff_snapshots(
+                left_bundle,
+                right_bundle,
+            ).model_dump(mode="json")
+
+        tools.extend(
+            [
+                structured_tool.from_function(
+                    func=create_snapshot,
+                    name="create_snapshot",
+                    description="Create and persist a normalized schema snapshot.",
+                    args_schema=CreateSnapshotInput,
+                ),
+                structured_tool.from_function(
+                    func=diff_snapshots,
+                    name="diff_snapshots",
+                    description="Diff two saved snapshot bundle paths.",
+                    args_schema=DiffSnapshotsInput,
+                ),
+            ]
+        )
+
     if services.query_service is not None:
 
         def safe_query_sql(
@@ -285,15 +359,15 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             result["lint"] = lint.model_dump(mode="json")
             return result
 
-        tools.append(
-            structured_tool.from_function(
-                func=safe_query_sql,
-                coroutine=safe_query_sql_async,
-                name="safe_query_sql",
-                description="Lint, guard, and execute read-only SQL with policy enforcement.",
-                args_schema=SafeQuerySqlInput,
-            )
-        )
+        tool_kwargs: dict[str, Any] = {
+            "func": safe_query_sql,
+            "name": "safe_query_sql",
+            "description": "Lint, guard, and execute read-only SQL with policy enforcement.",
+            "args_schema": SafeQuerySqlInput,
+        }
+        if services.async_engine is not None:
+            tool_kwargs["coroutine"] = safe_query_sql_async
+        tools.append(structured_tool.from_function(**tool_kwargs))
 
     if services.document_service is not None and services.snapshotter is not None:
 
@@ -311,6 +385,35 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 name="export_schema_documents",
                 description="Export retrieval-ready documents from the latest saved schema snapshot.",
                 args_schema=ExportSchemaDocumentsInput,
+            )
+        )
+
+    if services.diagram_service is not None and services.snapshotter is not None:
+
+        def generate_mermaid_erd(schema_name: str) -> dict[str, Any]:
+            bundle = services.snapshotter.load_latest_saved_snapshot(schema_name)
+            diagram_bundle = services.diagram_service.create_diagram_bundle(bundle)
+            path = services.diagram_service.save_diagram_bundle(diagram_bundle)
+            payload = diagram_bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            payload["mermaid_path"] = services.diagram_service.mermaid_path(
+                datasource_name=diagram_bundle.datasource_name,
+                schema_name=diagram_bundle.schema_name,
+                snapshot_id=diagram_bundle.snapshot_id,
+            ).as_posix()
+            payload["graph_path"] = services.diagram_service.graph_path(
+                datasource_name=diagram_bundle.datasource_name,
+                schema_name=diagram_bundle.schema_name,
+                snapshot_id=diagram_bundle.snapshot_id,
+            ).as_posix()
+            return payload
+
+        tools.append(
+            structured_tool.from_function(
+                func=generate_mermaid_erd,
+                name="generate_mermaid_erd",
+                description="Generate Mermaid ER and graph artifacts from the latest saved schema snapshot.",
+                args_schema=GenerateMermaidErdInput,
             )
         )
 

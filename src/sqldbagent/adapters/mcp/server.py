@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import orjson
+
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer
 from sqldbagent.snapshot.service import SnapshotService
@@ -91,10 +93,14 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             schema: str,
             sample_size: int = 5,
         ) -> dict[str, Any]:
-            return services.snapshotter.create_schema_snapshot(
+            bundle = services.snapshotter.create_schema_snapshot(
                 schema_name=schema,
                 sample_size=sample_size,
-            ).model_dump(mode="json")
+            )
+            path = services.snapshotter.save_snapshot(bundle)
+            payload = bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            return payload
 
         @server.tool
         def diff_snapshots(left_path: str, right_path: str) -> dict[str, Any]:
@@ -114,6 +120,27 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             path = services.document_service.save_document_bundle(document_bundle)
             payload = document_bundle.model_dump(mode="json")
             payload["path"] = path.as_posix()
+            return payload
+
+    if services.diagram_service is not None and services.snapshotter is not None:
+
+        @server.tool
+        def generate_mermaid_erd(schema: str) -> dict[str, Any]:
+            bundle = services.snapshotter.load_latest_saved_snapshot(schema)
+            diagram_bundle = services.diagram_service.create_diagram_bundle(bundle)
+            path = services.diagram_service.save_diagram_bundle(diagram_bundle)
+            payload = diagram_bundle.model_dump(mode="json")
+            payload["path"] = path.as_posix()
+            payload["mermaid_path"] = services.diagram_service.mermaid_path(
+                datasource_name=diagram_bundle.datasource_name,
+                schema_name=diagram_bundle.schema_name,
+                snapshot_id=diagram_bundle.snapshot_id,
+            ).as_posix()
+            payload["graph_path"] = services.diagram_service.graph_path(
+                datasource_name=diagram_bundle.datasource_name,
+                schema_name=diagram_bundle.schema_name,
+                snapshot_id=diagram_bundle.snapshot_id,
+            ).as_posix()
             return payload
 
     if services.retrieval_service is not None:
@@ -157,19 +184,21 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             result["lint"] = services.query_guard.lint(sql).model_dump(mode="json")
             return result
 
-        @server.tool
-        async def safe_query_sql_async(
-            sql: str,
-            max_rows: int | None = None,
-        ) -> dict[str, Any]:
-            result = (
-                await services.query_service.run_async(
-                    sql=sql,
-                    max_rows=max_rows,
-                )
-            ).model_dump(mode="json")
-            result["lint"] = services.query_guard.lint(sql).model_dump(mode="json")
-            return result
+        if services.async_engine is not None:
+
+            @server.tool
+            async def safe_query_sql_async(
+                sql: str,
+                max_rows: int | None = None,
+            ) -> dict[str, Any]:
+                result = (
+                    await services.query_service.run_async(
+                        sql=sql,
+                        max_rows=max_rows,
+                    )
+                ).model_dump(mode="json")
+                result["lint"] = services.query_guard.lint(sql).model_dump(mode="json")
+                return result
 
     @server.resource(
         "sqldbagent://instructions",
@@ -205,26 +234,34 @@ def create_mcp_server(services: ServiceContainer, name: str = "sqldbagent") -> A
             tools.extend(["create_snapshot", "diff_snapshots"])
         if services.document_service is not None and services.snapshotter is not None:
             tools.append("export_schema_documents")
+        if services.diagram_service is not None and services.snapshotter is not None:
+            tools.append("generate_mermaid_erd")
         if services.retrieval_service is not None:
             tools.extend(["index_schema_documents", "retrieve_schema_context"])
         if services.query_service is not None:
-            tools.extend(["safe_query_sql", "safe_query_sql_async"])
+            tools.append("safe_query_sql")
+        if services.query_service is not None and services.async_engine is not None:
+            tools.append("safe_query_sql_async")
 
-        return {
-            "tools": tools,
-            "prompts": [
-                "schema_explorer",
-                "table_summary",
-                "safe_query_workflow",
-                "retrieval_workflow",
-            ],
-            "notes": [
-                "Normalized metadata is the primary contract for downstream adapters.",
-                "Guarded SQL is read-only and row-limited by policy.",
-                "Snapshot bundles are meant to be stored and reloaded as durable artifacts.",
-                "Retrieval works over stored snapshot documents indexed in Qdrant.",
-            ],
-        }
+        return orjson.dumps(
+            {
+                "tools": tools,
+                "prompts": [
+                    "schema_explorer",
+                    "table_summary",
+                    "safe_query_workflow",
+                    "retrieval_workflow",
+                ],
+                "notes": [
+                    "Normalized metadata is the primary contract for downstream adapters.",
+                    "Guarded SQL is read-only and row-limited by policy.",
+                    "Snapshot bundles are meant to be stored and reloaded as durable artifacts.",
+                    "Diagrams are generated from stored snapshot bundles, not ad hoc SQL.",
+                    "Retrieval works over stored snapshot documents indexed in Qdrant.",
+                ],
+            },
+            option=orjson.OPT_INDENT_2,
+        ).decode()
 
     @server.prompt(
         name="schema_explorer",
