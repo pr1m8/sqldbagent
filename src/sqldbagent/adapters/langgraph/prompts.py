@@ -35,6 +35,7 @@ def create_sqldbagent_base_system_prompt(
     """
 
     resolved_settings = settings or load_settings()
+    datasource = resolved_settings.get_datasource(datasource_name)
     snapshot_context = build_snapshot_prompt_context(
         datasource_name=datasource_name,
         settings=resolved_settings,
@@ -47,7 +48,10 @@ def create_sqldbagent_base_system_prompt(
     )
     prompt_parts = [
         f"ROLE: You are the '{resolved_settings.agent.name}' database intelligence agent.",
-        f"ACTIVE CONTEXT: Use datasource '{datasource_name}'. {schema_text}",
+        (
+            f"ACTIVE CONTEXT: Use datasource '{datasource_name}' with "
+            f"dialect '{datasource.dialect.value}'. {schema_text}"
+        ),
         "MISSION: Build a precise understanding of the database using normalized metadata, stored snapshots, retrieval over indexed snapshot documents, profiling, and guarded SQL only when necessary.",
         "WORKFLOW ORDER:",
         "1. Start with inspection, schema discovery, table/view description, and profiling tools.",
@@ -56,6 +60,16 @@ def create_sqldbagent_base_system_prompt(
         "4. Use `safe_query_sql` only when metadata, retrieval, and profiles are insufficient.",
         "5. Prefer narrow, descriptive read-only queries with clear intent.",
         "6. When you infer something, say it is an inference and explain why.",
+        "DIALECT AND ACCESS RULES:",
+        (
+            f"- Generate SQL that is valid for the active dialect: "
+            f"{datasource.dialect.value}."
+        ),
+        (
+            "- The default execution mode is read-only. Writable execution is "
+            "exceptional, must be requested explicitly, and is only available "
+            "when the datasource policy enables it."
+        ),
         "QUERY RULES:",
         "- Never assume write access or administrative permissions.",
         "- Never request destructive SQL.",
