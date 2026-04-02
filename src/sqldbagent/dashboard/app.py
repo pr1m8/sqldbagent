@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404
 from collections.abc import MutableMapping
 from html import escape
 from json import dumps as json_dumps
+from shutil import which
 from uuid import uuid4
 
 import orjson
@@ -19,6 +21,8 @@ from sqldbagent.dashboard.models import (
     DashboardTurnProgressModel,
 )
 from sqldbagent.dashboard.service import DashboardChatService
+
+_GRAPHVIZ_DOT_EXECUTABLE = which("dot")
 
 
 def _resolve_dashboard_checkpointer(
@@ -282,28 +286,62 @@ def _build_mermaid_embed(mermaid_text: str) -> str:
         }}
       }}
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.2/dist/svg-pan-zoom.min.js"></script>
-    <script type="module">
-      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-
+    <script>
       const diagramSource = {json_dumps(mermaid_text)};
+      const simplifyTypeToken = (token) => {{
+        const normalized = String(token || "")
+          .replace(/[^A-Za-z0-9_]/g, "_")
+          .replace(/_+/g, "_")
+          .replace(/^_+|_+$/g, "");
+        if (!normalized) {{
+          return "TYPE";
+        }}
+        return /^[A-Za-z]/.test(normalized) ? normalized : "TYPE_" + normalized;
+      }};
+      const buildFallbackDiagramSource = (source) => {{
+        return String(source || "")
+          .split("\\n")
+          .map((line) => {{
+            if (/^\\s*%%/.test(line)) {{
+              return "";
+            }}
+            if (/^\\s*direction\\s+/i.test(line)) {{
+              return "";
+            }}
+            if (/^\\s{{4,}}[A-Za-z]/.test(line) && !line.includes("{{") && !line.includes("}}")) {{
+              const match = line.match(/^(\\s+)(\\S+)(\\s+.+)$/);
+              if (match) {{
+                return match[1] + simplifyTypeToken(match[2]) + match[3];
+              }}
+            }}
+            return line;
+          }})
+          .filter((line) => line !== "")
+          .join("\\n");
+      }};
+      const renderDiagram = async (mermaidApi, source, id) => {{
+        await mermaidApi.parse(source, {{ suppressErrors: false }});
+        return mermaidApi.render(id, source);
+      }};
 
-      mermaid.initialize({{
+        mermaid.initialize({{
         startOnLoad: true,
         securityLevel: "loose",
         theme: "base",
         themeVariables: {{
-          primaryColor: "#e2f6ef",
-          primaryTextColor: "#12332e",
-          primaryBorderColor: "#1f6f64",
-          lineColor: "#2c7267",
-          secondaryColor: "#eef8f4",
+          primaryColor: "#f7fbfa",
+          primaryTextColor: "#173a35",
+          primaryBorderColor: "#2d6f66",
+          lineColor: "#3a6d67",
+          secondaryColor: "#eef6f3",
           tertiaryColor: "#ffffff",
           background: "#ffffff",
           mainBkg: "#ffffff",
-          nodeBkg: "#f4fbf8",
-          clusterBkg: "#fbfefd",
-          edgeLabelBackground: "#ffffff",
+          nodeBkg: "#fbfdfc",
+          clusterBkg: "#f4faf8",
+          edgeLabelBackground: "#f9fcfb",
           fontFamily: "ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
         }},
       }});
@@ -325,16 +363,36 @@ def _build_mermaid_embed(mermaid_text: str) -> str:
         }}
 
         try {{
-          const renderResult = await mermaid.render(
-            "sqldbagent-mermaid-diagram",
-            diagramSource
+          const renderResult = await renderDiagram(
+            mermaid,
+            diagramSource,
+            "sqldbagent-mermaid-diagram"
           );
           surface.innerHTML = renderResult.svg;
         }} catch (error) {{
-          const message = error?.message || String(error) || "Unknown Mermaid error";
-          status.textContent = "Unable to render Mermaid SVG.";
-          surface.innerHTML = "<div style=\\"padding:1rem;color:#9b2c2c;font-weight:600;\\">Mermaid rendering failed.<br/><span style=\\"font-weight:400;white-space:pre-wrap;\\">" + message + "</span></div>";
-          return;
+          const fallbackSource = buildFallbackDiagramSource(diagramSource);
+          try {{
+            const fallbackResult = await renderDiagram(
+              mermaid,
+              fallbackSource,
+              "sqldbagent-mermaid-diagram-fallback"
+            );
+            surface.innerHTML = fallbackResult.svg;
+            status.textContent =
+              "Rendered a simplified Mermaid fallback after the primary diagram failed to parse.";
+          }} catch (fallbackError) {{
+            const primaryMessage = error?.message || String(error) || "Unknown Mermaid error";
+            const fallbackMessage =
+              fallbackError?.message || String(fallbackError) || "Unknown fallback Mermaid error";
+            status.textContent = "Unable to render Mermaid SVG.";
+            surface.innerHTML =
+              "<div style=\\"padding:1rem;color:#9b2c2c;font-weight:600;\\">Mermaid rendering failed.<br/><span style=\\"font-weight:400;white-space:pre-wrap;\\">Primary error: "
+              + primaryMessage
+              + "\\nFallback error: "
+              + fallbackMessage
+              + "</span></div>";
+            return;
+          }}
         }}
 
         const svg = surface.querySelector("svg");
@@ -563,6 +621,36 @@ def _build_graphviz_dot(graph: object) -> str:
 
     lines.append("}")
     return "\n".join(lines)
+
+
+def _render_graphviz_image(graph: object, *, image_format: str = "png") -> bytes | None:
+    """Render a schema graph into an image via the local Graphviz `dot` binary.
+
+    Args:
+        graph: Diagram graph model with `nodes` and `edges` collections.
+        image_format: Output image format supported by Graphviz, typically
+            `png` or `svg`.
+
+    Returns:
+        bytes | None: Rendered image bytes, or `None` when Graphviz rendering
+        is unavailable.
+    """
+
+    if _GRAPHVIZ_DOT_EXECUTABLE is None:
+        return None
+    try:
+        completed = subprocess.run(  # nosec B603
+            [_GRAPHVIZ_DOT_EXECUTABLE, f"-T{image_format}"],
+            input=_build_graphviz_dot(graph).encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not completed.stdout:
+        return None
+    return completed.stdout
 
 
 def _build_plotly_schema_figure(graph: object) -> object:
@@ -1353,8 +1441,10 @@ def main() -> None:
         else:
             st.caption(session.diagram_bundle.summary or "Stored schema diagram")
             graph = session.diagram_bundle.graph
-            interactive_tab, mermaid_tab, graph_tab, graph_data_tab = st.tabs(
-                ["Interactive", "Mermaid", "Graphviz", "Graph Data"]
+            png_bytes = _render_graphviz_image(graph, image_format="png")
+            svg_bytes = _render_graphviz_image(graph, image_format="svg")
+            interactive_tab, image_tab, mermaid_tab, graph_tab, graph_data_tab = (
+                st.tabs(["Interactive", "Image", "Mermaid", "Graphviz", "Graph Data"])
             )
             with interactive_tab:
                 st.plotly_chart(
@@ -1366,6 +1456,43 @@ def main() -> None:
                     "Interactive schema view backed by the stored graph payload. "
                     "Use Mermaid below when you want the textual ER artifact itself."
                 )
+            with image_tab:
+                if png_bytes is None:
+                    st.info(
+                        "A generated schema image is not available in this environment."
+                    )
+                else:
+                    st.image(
+                        png_bytes,
+                        caption="Generated schema image fallback",
+                        use_container_width=True,
+                    )
+                    st.caption(
+                        "This image is rendered locally from the stored schema graph, so it still works even when the browser Mermaid renderer does not."
+                    )
+                    st.download_button(
+                        label="Download PNG",
+                        data=png_bytes,
+                        file_name=(
+                            f"{session.diagram_bundle.datasource_name}"
+                            f"_{session.diagram_bundle.schema_name}"
+                            f"_{session.diagram_bundle.snapshot_id}.png"
+                        ),
+                        mime="image/png",
+                        use_container_width=True,
+                    )
+                    if svg_bytes is not None:
+                        st.download_button(
+                            label="Download SVG",
+                            data=svg_bytes,
+                            file_name=(
+                                f"{session.diagram_bundle.datasource_name}"
+                                f"_{session.diagram_bundle.schema_name}"
+                                f"_{session.diagram_bundle.snapshot_id}.svg"
+                            ),
+                            mime="image/svg+xml",
+                            use_container_width=True,
+                        )
             with mermaid_tab:
                 components.html(
                     _build_mermaid_embed(session.diagram_bundle.mermaid_erd),
@@ -1858,7 +1985,20 @@ def main() -> None:
             or settings.default_schema_name
             or "public"
         )
-        if session.latest_snapshot_id is None:
+        active_snapshot_id = (
+            session.latest_snapshot_id
+            or (
+                None
+                if session.prompt_bundle is None
+                else session.prompt_bundle.snapshot_id
+            )
+            or (
+                None
+                if session.diagram_bundle is None
+                else session.diagram_bundle.snapshot_id
+            )
+        )
+        if active_snapshot_id is None:
             st.info(
                 "No stored snapshot is available yet. Create a snapshot first, then you can build a retrieval index for it."
             )
@@ -1877,6 +2017,8 @@ def main() -> None:
                     st.metric("Documents", manifest.document_count)
                     st.metric("Snapshot", manifest.snapshot_id)
                     st.write(f"Collection: `{manifest.collection_name}`")
+            if session.latest_snapshot_summary:
+                st.caption(session.latest_snapshot_summary)
 
             action_left, action_right = st.columns(2)
             if action_left.button(

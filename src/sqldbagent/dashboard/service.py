@@ -714,6 +714,13 @@ class DashboardChatService:
             schema_name=schema_name,
             values=values,
         )
+        latest_snapshot_id = values.get("latest_snapshot_id")
+        latest_snapshot_summary = values.get("latest_snapshot_summary")
+        if snapshot is not None:
+            if latest_snapshot_id is None:
+                latest_snapshot_id = snapshot.snapshot_id
+            if latest_snapshot_summary is None:
+                latest_snapshot_summary = snapshot.summary
         return ChatSessionModel(
             thread_id=thread_id,
             datasource_name=datasource_name,
@@ -723,8 +730,8 @@ class DashboardChatService:
             observability=self._build_observability_payload(
                 datasource_name=datasource_name
             ),
-            latest_snapshot_id=values.get("latest_snapshot_id"),
-            latest_snapshot_summary=values.get("latest_snapshot_summary"),
+            latest_snapshot_id=latest_snapshot_id,
+            latest_snapshot_summary=latest_snapshot_summary,
             tool_call_digest=list(values.get("tool_call_digest") or []),
             diagram_bundle=diagram_bundle,
             prompt_bundle=prompt_bundle,
