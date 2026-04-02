@@ -67,3 +67,41 @@ def test_sqlalchemy_profiling_service_profiles_sqlite_table(tmp_path) -> None:
         raise AssertionError(column_profiles["is_active"])
     if len(samples) != 2:
         raise AssertionError(samples)
+
+
+def test_sqlalchemy_profiling_service_gets_unique_values(tmp_path) -> None:
+    """Return a column-level distinct-value payload with counts."""
+
+    database_path = tmp_path / "unique-values.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(text("""
+                CREATE TABLE customers (
+                    id INTEGER PRIMARY KEY,
+                    segment TEXT,
+                    country_code TEXT
+                )
+                """))
+        connection.execute(text("""
+                INSERT INTO customers (id, segment, country_code) VALUES
+                (1, 'enterprise', 'US'),
+                (2, 'mid_market', 'CA'),
+                (3, 'enterprise', 'US'),
+                (4, NULL, 'DE')
+                """))
+
+    inspector = SQLAlchemyInspectionService(engine)
+    profiler = SQLAlchemyProfilingService(engine=engine, inspector=inspector)
+    values = profiler.get_unique_values("customers", "segment", limit=1)
+    engine.dispose()
+
+    if values.unique_value_count != 2:
+        raise AssertionError(values)
+    if values.null_count != 1:
+        raise AssertionError(values)
+    if values.truncated is not True:
+        raise AssertionError(values)
+    if values.values[0]["value"] != "enterprise":
+        raise AssertionError(values.values)
+    if values.values[0]["count"] != 2:
+        raise AssertionError(values.values)

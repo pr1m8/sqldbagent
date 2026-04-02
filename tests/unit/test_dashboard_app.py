@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqldbagent.core.config import AgentCheckpointSettings, AgentSettings, AppSettings
+from sqldbagent.core.config import (
+    AgentCheckpointSettings,
+    AgentMemorySettings,
+    AgentSettings,
+    AppSettings,
+)
 from sqldbagent.dashboard.app import (
     _build_checkpoint_status,
     _build_database_access_status,
@@ -12,6 +17,7 @@ from sqldbagent.dashboard.app import (
     _build_mermaid_embed,
     _format_thread_label,
     _resolve_dashboard_checkpointer,
+    _resolve_dashboard_store,
     _should_render_chat_message,
     _should_show_example_questions,
     _summarize_tool_message,
@@ -90,6 +96,48 @@ def test_resolve_dashboard_checkpointer_uses_session_memory_when_postgres_missin
         raise AssertionError(session_state)
     if first is not second:
         raise AssertionError("Expected the same fallback memory checkpointer instance")
+
+
+def test_resolve_dashboard_store_reuses_session_memory_store() -> None:
+    """Reuse one in-memory store for the whole Streamlit session."""
+
+    session_state: dict[str, object] = {}
+    settings = AppSettings(
+        datasources=[],
+        agent=AgentSettings(
+            memory=AgentMemorySettings(backend="memory"),
+        ),
+    )
+
+    first = _resolve_dashboard_store(session_state, settings)
+    second = _resolve_dashboard_store(session_state, settings)
+
+    if first is None or second is None:
+        raise AssertionError(session_state)
+    if first is not second:
+        raise AssertionError("Expected the same memory store instance")
+
+
+def test_resolve_dashboard_store_defers_to_postgres_backend() -> None:
+    """Avoid injecting a memory store when Postgres memory is enabled."""
+
+    session_state: dict[str, object] = {}
+    settings = AppSettings(
+        datasources=[],
+        agent=AgentSettings(
+            memory=AgentMemorySettings(
+                backend="postgres",
+                postgres_url="postgresql+psycopg://demo:demo@127.0.0.1:5432/demo",
+            ),
+        ),
+    )
+
+    resolved = _resolve_dashboard_store(session_state, settings)
+
+    if resolved is not None:
+        raise AssertionError(resolved)
+    if "dashboard_store" in session_state:
+        raise AssertionError(session_state)
 
 
 def test_build_checkpoint_status_reflects_backend() -> None:

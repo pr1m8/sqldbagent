@@ -14,6 +14,8 @@ from sqldbagent.adapters.langgraph.memory import (
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer
 
+ToolRuntime = Any
+
 
 class ListSchemasInput(BaseModel):
     """Input for schema listing.
@@ -215,7 +217,7 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
     structured_tool = tools_module.StructuredTool
     tool_module = require_dependency("langchain.tools", "langchain")
     tool = tool_module.tool
-    tool_runtime = tool_module.ToolRuntime
+    globals()["ToolRuntime"] = tool_module.ToolRuntime
     tools: list[Any] = []
     settings = services.settings
     datasource_name = services.datasource_name
@@ -548,8 +550,8 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
 
     if settings is not None and datasource_name is not None:
 
-        @tool(parse_docstring=True)
-        def load_database_memory_tool(runtime: tool_runtime) -> dict[str, Any]:
+        @tool("load_database_memory", parse_docstring=True)
+        def load_database_memory_tool(runtime: ToolRuntime) -> dict[str, Any]:
             """Load the remembered datasource/schema context for the active agent.
 
             Args:
@@ -572,10 +574,10 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 }
             return record.model_dump(mode="json")
 
-        @tool(parse_docstring=True)
+        @tool("remember_database_context", parse_docstring=True)
         def remember_database_context_tool(
             notes: list[str],
-            runtime: tool_runtime,
+            runtime: ToolRuntime,
             prompt_instructions: str | None = None,
             preferred_tables: list[str] | None = None,
             merge: bool = True,
@@ -612,10 +614,10 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
 
         if services.snapshotter is not None:
 
-            @tool(parse_docstring=True)
+            @tool("sync_database_memory", parse_docstring=True)
             def sync_database_memory_tool(
                 schema_name: str,
-                runtime: tool_runtime,
+                runtime: ToolRuntime,
                 create_snapshot_if_missing: bool = True,
                 sample_size: int = 5,
             ) -> dict[str, Any]:
