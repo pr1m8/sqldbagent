@@ -110,6 +110,66 @@ def _build_mermaid_embed(mermaid_text: str) -> str:
 """.strip()
 
 
+def _escape_graphviz_label(value: str) -> str:
+    """Escape one Graphviz label fragment.
+
+    Args:
+        value: Raw label text.
+
+    Returns:
+        str: Graphviz-safe label text.
+    """
+
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _build_graphviz_dot(graph: object) -> str:
+    """Build a Graphviz DOT graph from one diagram bundle graph payload.
+
+    Args:
+        graph: Diagram graph model with `nodes` and `edges` collections.
+
+    Returns:
+        str: DOT source suitable for `st.graphviz_chart`.
+    """
+
+    lines = [
+        "digraph schema {",
+        '  graph [rankdir="LR", pad="0.3", nodesep="0.5", ranksep="0.8"];',
+        '  node [shape="box", style="rounded,filled", color="#1f6f64", fillcolor="#ecf8f5", fontname="Helvetica", fontsize="11"];',
+        '  edge [color="#4b6b66", fontname="Helvetica", fontsize="10"];',
+    ]
+
+    for node in getattr(graph, "nodes", []):
+        kind = getattr(node, "kind", "table")
+        label_parts = [getattr(node, "label", getattr(node, "object_name", "object"))]
+        summary = getattr(node, "summary", None)
+        if summary:
+            label_parts.append(summary[:80])
+        shape = "box" if kind == "table" else "ellipse"
+        fillcolor = "#ecf8f5" if kind == "table" else "#f8f4ea"
+        label = "\\n".join(_escape_graphviz_label(part) for part in label_parts if part)
+        node_id = _escape_graphviz_label(getattr(node, "node_id", "node"))
+        lines.append(
+            f'  "{node_id}" [label="{label}", shape="{shape}", fillcolor="{fillcolor}"];'
+        )
+
+    for edge in getattr(graph, "edges", []):
+        source = _escape_graphviz_label(getattr(edge, "source_node_id", "source"))
+        target = _escape_graphviz_label(getattr(edge, "target_node_id", "target"))
+        label = (
+            getattr(edge, "label", None) or getattr(edge, "constraint_name", "") or ""
+        )
+        safe_label = _escape_graphviz_label(label)
+        if safe_label:
+            lines.append(f'  "{source}" -> "{target}" [label="{safe_label}"];')
+        else:
+            lines.append(f'  "{source}" -> "{target}";')
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def _format_thread_label(
     entry: DashboardThreadEntryModel | None,
     *,
@@ -316,14 +376,24 @@ def main() -> None:
             )
         else:
             st.caption(session.diagram_bundle.summary or "Stored schema diagram")
-            components.html(
-                _build_mermaid_embed(session.diagram_bundle.mermaid_erd),
-                height=720,
-                scrolling=True,
-            )
             graph = session.diagram_bundle.graph
-            left_column, right_column = st.columns([2, 1])
-            with left_column:
+            graph_tab, mermaid_tab, graph_data_tab = st.tabs(
+                ["Graph", "Mermaid", "Graph Data"]
+            )
+            with graph_tab:
+                if graph.nodes:
+                    st.graphviz_chart(
+                        _build_graphviz_dot(graph),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("No graph nodes are available for this schema snapshot.")
+            with mermaid_tab:
+                components.html(
+                    _build_mermaid_embed(session.diagram_bundle.mermaid_erd),
+                    height=720,
+                    scrolling=True,
+                )
                 st.subheader("Mermaid Source")
                 st.code(session.diagram_bundle.mermaid_erd, language="mermaid")
                 st.download_button(
@@ -337,22 +407,38 @@ def main() -> None:
                     mime="text/plain",
                     use_container_width=True,
                 )
-            with right_column:
-                st.subheader("Graph Summary")
-                st.metric("Nodes", len(graph.nodes))
-                st.metric("Edges", len(graph.edges))
-                st.dataframe(
-                    [
-                        {
-                            "label": node.label,
-                            "kind": node.kind,
-                            "summary": node.summary or "",
-                        }
-                        for node in graph.nodes
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
+            with graph_data_tab:
+                left_column, right_column = st.columns([2, 1])
+                with left_column:
+                    st.subheader("Nodes")
+                    st.dataframe(
+                        [
+                            {
+                                "label": node.label,
+                                "kind": node.kind,
+                                "summary": node.summary or "",
+                            }
+                            for node in graph.nodes
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                with right_column:
+                    st.subheader("Graph Summary")
+                    st.metric("Nodes", len(graph.nodes))
+                    st.metric("Edges", len(graph.edges))
+                    st.dataframe(
+                        [
+                            {
+                                "from": edge.source_node_id,
+                                "to": edge.target_node_id,
+                                "label": edge.label or "",
+                            }
+                            for edge in graph.edges
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
     with prompt_tab:
         if session.prompt_bundle is None:

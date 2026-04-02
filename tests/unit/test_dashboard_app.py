@@ -7,11 +7,17 @@ from datetime import UTC, datetime
 from sqldbagent.core.config import AgentCheckpointSettings, AgentSettings, AppSettings
 from sqldbagent.dashboard.app import (
     _build_checkpoint_status,
+    _build_graphviz_dot,
     _build_mermaid_embed,
     _format_thread_label,
     _resolve_dashboard_checkpointer,
 )
 from sqldbagent.dashboard.models import DashboardThreadEntryModel
+from sqldbagent.diagrams.models import (
+    SchemaGraphEdgeModel,
+    SchemaGraphModel,
+    SchemaGraphNodeModel,
+)
 
 
 def test_resolve_dashboard_checkpointer_reuses_session_memory_saver() -> None:
@@ -100,3 +106,40 @@ def test_format_thread_label_uses_preview_and_timestamp() -> None:
         raise AssertionError(label)
     if "[public]" not in label:
         raise AssertionError(label)
+
+
+def test_build_graphviz_dot_contains_nodes_and_edges() -> None:
+    """Build DOT output for Streamlit graph rendering."""
+
+    graph = SchemaGraphModel(
+        nodes=[
+            SchemaGraphNodeModel(
+                node_id="public.customers",
+                label="public.customers",
+                kind="table",
+                object_name="customers",
+            ),
+            SchemaGraphNodeModel(
+                node_id="public.orders",
+                label="public.orders",
+                kind="table",
+                object_name="orders",
+            ),
+        ],
+        edges=[
+            SchemaGraphEdgeModel(
+                source_node_id="public.orders",
+                target_node_id="public.customers",
+                label="customer_id",
+            )
+        ],
+    )
+
+    dot = _build_graphviz_dot(graph)
+
+    if "digraph schema {" not in dot:
+        raise AssertionError(dot)
+    if '"public.orders" -> "public.customers"' not in dot:
+        raise AssertionError(dot)
+    if 'label="customer_id"' not in dot:
+        raise AssertionError(dot)
