@@ -33,6 +33,8 @@ pdm run sqldbagent prompt export postgres_demo public
 make dashboard-demo
 ```
 
+The demo dashboard prefers durable Postgres checkpointing when local checkpoint configuration is present, and it will tell you when it has to fall back to a session-only saver.
+
 ## What to Expect
 
 - Snapshots are stored under `var/sqldbagent/snapshots/<datasource>/<schema>/`.

@@ -29,3 +29,5 @@ make demo-rag-index
 make demo-rag-query
 make dashboard-demo
 ```
+
+`make dashboard-demo` prefers durable Postgres checkpointing for demo threads when the local checkpoint configuration is available.
