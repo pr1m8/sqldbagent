@@ -1,12 +1,12 @@
-# Dashboard API
+# Snapshot API
 
 ```{eval-rst}
-.. automodule:: sqldbagent.dashboard.models
+.. automodule:: sqldbagent.snapshot.models
    :members:
    :undoc-members:
    :exclude-members: Field
 
-.. automodule:: sqldbagent.dashboard.service
+.. automodule:: sqldbagent.snapshot.service
    :members:
    :undoc-members:
 ```

@@ -30,14 +30,14 @@ The initial target is Postgres and MSSQL, with SQLite used as a lightweight smok
 
 ```{mermaid}
 flowchart LR
-    A[Datasources\nPostgres | MSSQL | SQLite] --> B[Engines + Safety]
-    B --> C[Normalized Metadata Core]
-    C --> D[Snapshot + Profile + Diagram + Docs]
-    D --> E[CLI]
-    D --> F[Dashboard]
+    A["Datasources<br/>Postgres, MSSQL, SQLite"] --> B["Engines + Safety"]
+    B --> C["Normalized Metadata Core"]
+    C --> D["Snapshot + Profile + Diagram + Docs"]
+    D --> E["CLI"]
+    D --> F["Dashboard"]
     D --> G[MCP]
-    D --> H[LangChain / LangGraph]
-    H --> I[LangSmith Tracing]
+    D --> H["LangChain / LangGraph"]
+    H --> I["LangSmith Tracing"]
 ```
 
 ```{toctree}
