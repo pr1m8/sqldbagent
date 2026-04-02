@@ -77,6 +77,7 @@ class ArtifactSettings(BaseModel):
         root_dir: Base directory for generated artifacts.
         snapshots_dir: Snapshot subdirectory under `root_dir`.
         documents_dir: Document-export subdirectory under `root_dir`.
+        diagrams_dir: Diagram-export subdirectory under `root_dir`.
         embeddings_cache_dir: Embedding cache subdirectory under `root_dir`.
         vectorstores_dir: Retrieval/vectorstore manifest subdirectory under `root_dir`.
     """
@@ -86,6 +87,7 @@ class ArtifactSettings(BaseModel):
     root_dir: str = "var/sqldbagent"
     snapshots_dir: str = "snapshots"
     documents_dir: str = "documents"
+    diagrams_dir: str = "diagrams"
     embeddings_cache_dir: str = "embeddings-cache"
     vectorstores_dir: str = "vectorstores"
 
