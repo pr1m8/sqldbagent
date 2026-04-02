@@ -1,131 +1,132 @@
 # sqldbagent
 
-`sqldbagent` is a service-first database intelligence platform for safe inspection, profiling, snapshotting, guarded querying, and agent-ready export of relational databases.
+[![CI](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/ci.yml)
+[![Docs](https://github.com/pr1m8/sqldbagent/actions/workflows/docs.yml/badge.svg)](https://github.com/pr1m8/sqldbagent/actions/workflows/docs.yml)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-0f766e.svg)](https://www.python.org/downloads/)
+[![PDM](https://img.shields.io/badge/deps-pdm-334155.svg)](https://pdm-project.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-115e59.svg)](LICENSE)
 
-## Product Goal
+Safe database intelligence for agents, operators, and automation.
 
-`sqldbagent` is not just a thin SQL wrapper and not just a schema dumper.
+sqldbagent is a service-first platform for understanding relational databases through normalized metadata, durable artifacts, guarded querying, and agent-ready surfaces. It starts with Postgres and MSSQL, uses SQLite as a lightweight smoke/E2E target, and keeps the shared service layer authoritative across every interface.
 
-The product goal is to become the safe backend that an engineer, CLI workflow, MCP server, or LLM agent can rely on to:
+## Why This Exists
 
-- understand a relational database through normalized metadata
-- inspect schemas and tables without dialect-specific branching in every surface
-- guard SQL before execution so agent access does not become arbitrary database access
-- produce durable artifacts like snapshots, docs, diagrams, and prompt context
+Most database tooling gives you one of two extremes:
 
-## Core Thesis
+- a thin SQL shell with no meaningful safety boundary
+- a one-off schema export with no reusable runtime context
 
-Build a safe database intelligence core first, then expose it through multiple surfaces.
+sqldbagent is trying to sit in the middle:
 
-Non-goals for the current phase:
+- inspect and normalize database structure once
+- store snapshots, profiles, docs, diagrams, prompts, and retrieval indexes durably
+- let CLI workflows, dashboards, MCP tools, and LangGraph agents reuse that context
+- keep all agent-facing SQL behind an explicit read-only safety layer
 
-- not a general database admin console
-- not a write-capable agent
-- not a dashboard-first product
-- not a loose collection of LangChain helpers without a stable service layer
+## Core Shape
 
-The architecture target is:
+The architecture rule is:
 
-- normalized metadata core in the middle
-- Postgres and MSSQL dialect enrichers on the edges
-- CLI, TUI, MCP, LangChain, LangGraph, and dashboard surfaces on top of the same services
+### Normalized Metadata Core In The Middle, Dialect Enrichers On The Edges
 
-The first implementation priorities are:
+That means:
 
-- datasource config and engine factories
-- normalized catalog metadata models
-- read-only inspection for Postgres and MSSQL
-- SQL safety guardrails and query analysis
-- snapshot and profile services
-- export pipelines for docs, diagrams, and prompt context
+- shared models for databases, schemas, tables, views, columns, relationships, profiles, and snapshots
+- Postgres and MSSQL adapters for dialect-specific introspection and execution details
+- thin surfaces on top: CLI, dashboard, MCP, LangChain, and LangGraph
 
-Development hygiene should default to `trunk check --fix`, with conventional commits managed through Commitizen.
+## Current Capabilities
 
-Current bootstrap surface includes:
-
-- Pydantic Settings-based config loading
-- datasource registry and sync SQLAlchemy engine factory
-- normalized server/schema/table/view inspection service with summaries
+- datasource config and engine factories through Pydantic Settings and `.env`
+- normalized inspection of servers, schemas, tables, and views
 - profiling with row counts, distinct/null stats, samples, storage hints, and entity heuristics
-- SQL guard service for read-only query analysis and row-limit enforcement
-- guarded sync and async query execution
-- snapshot persistence with content hashes, relationship edges, inventory indexing, and diffing
-- prompt persistence with descriptive system prompts, state seeds, and Markdown companions
-- document export from stored snapshots into retrieval-ready bundles
-- diagram export from stored snapshots into Mermaid and graph bundles
-- Qdrant-backed retrieval over stored snapshot documents with cached embeddings
-- LangChain, LangGraph, and FastMCP adapter factories
-- LangGraph agent builders with memory or Postgres-backed checkpointing
-- LangChain v1 middleware for dynamic prompting, todo tracking, tool handling, state seeding, and optional HITL / summarization
-- Streamlit dashboard chat surface backed by persisted LangGraph thread IDs
-- CLI commands:
-  - `sqldbagent config validate`
-  - `sqldbagent inspect server`
-  - `sqldbagent inspect databases`
-  - `sqldbagent inspect schemas`
-  - `sqldbagent inspect tables`
-  - `sqldbagent inspect table`
-  - `sqldbagent profile table`
-  - `sqldbagent profile sample`
-  - `sqldbagent query lint`
-  - `sqldbagent query guard`
-  - `sqldbagent query run`
-  - `sqldbagent query run-async`
-  - `sqldbagent snapshot create`
-  - `sqldbagent snapshot list`
-  - `sqldbagent snapshot latest`
-  - `sqldbagent snapshot diff`
-  - `sqldbagent diagram schema`
-  - `sqldbagent diagram from-snapshot`
-  - `sqldbagent docs export`
-  - `sqldbagent docs export-from-snapshot`
-  - `sqldbagent dashboard serve`
-  - `sqldbagent prompt export`
-  - `sqldbagent prompt export-from-snapshot`
-  - `sqldbagent rag index`
-  - `sqldbagent rag query`
-  - `sqldbagent mcp serve`
-- `Makefile` targets for unit, integration, and E2E workflows
+- guarded sync and async SQL execution
+- snapshot persistence with per-datasource and per-schema storage
+- snapshot diffing, docs export, Mermaid ER export, and prompt export
+- Qdrant-backed retrieval over stored snapshot documents
+- LangChain tools and LangGraph agent builders with middleware, checkpointing, and optional LangSmith tracing
+- FastMCP server surface
+- Streamlit dashboard chat surface over the same persisted agent stack
 
-Local integration services are intended to be raised with `make up` and stopped
-with `make down`.
+## Install
 
-Saved snapshots now live under `var/sqldbagent/snapshots/<datasource>/<schema>/` with an
-`index.json` inventory, so multiple server/schema contexts can be stored and reloaded
-without re-introspecting immediately.
+With PDM:
 
-Saved document exports now live under `var/sqldbagent/documents/<datasource>/<schema>/`,
-and retrieval manifests live under `var/sqldbagent/vectorstores/<datasource>/<schema>/`.
-That keeps snapshot documents, cached embeddings, and vector indexing durable and reloadable.
+```bash
+pdm install -G :all
+```
 
-Saved prompt bundles now live under `var/sqldbagent/prompts/<datasource>/<schema>/`.
-Each prompt export persists both a JSON bundle and a Markdown companion so prompt
-context, state seeding, and system-prompt text can be reviewed or reused later.
+With pip:
 
-Retrieval is intentionally an additive helper, not the primary product shape. The core
-workflow is still inspect -> profile -> snapshot -> safe query. Qdrant-backed retrieval
-sits beside that so agents and operators can reuse stored schema context before hitting
-the live database again.
+```bash
+pip install "sqldbagent[cli,postgres,langchain,langgraph,mcp,dashboard,docs,test]"
+```
 
-When agent persistence is enabled, local Postgres is the default LangGraph checkpoint
-target for demos and local development. In real deployments, the checkpoint database
-should usually be a separate Postgres instance or database from the inspected datasource.
+## Local Demo
 
-`langgraph.json` now points at the local package root, so `langgraph dev` can use
-`pyproject.toml` as the dependency source instead of repeating package names in the
-LangGraph config.
+Bring up the local integration stack and migrate the demo database:
 
-FastMCP serving is also settings-driven now. `sqldbagent mcp serve` defaults to the
-transport and host/port/path values in `.env`, with CLI flags available for overrides.
+```bash
+make up
+make demo-migrate
+```
 
-The first dashboard surface is a chat-style Streamlit app backed by the same
-LangGraph agent stack. Reuse a `thread_id` in the dashboard to continue the same
-conversation through the configured checkpointer.
+Run the common workflow:
 
-Datasource aliases can be provided with `SQLDBAGENT_DATASOURCE_ALIASES` as JSON,
-for example `{"demo":"postgres_demo","pg":"postgres"}`. This keeps CLI and
-agent-facing names short without changing canonical datasource IDs on disk.
+```bash
+pdm run sqldbagent inspect tables postgres_demo --schema public
+pdm run sqldbagent snapshot create postgres_demo public
+pdm run sqldbagent prompt export postgres_demo public
+make dashboard-demo
+```
 
-Implementation details, module boundaries, and milestone deliverables live in [docs/implementation-roadmap.md](/Users/will/Projects/sqldbagent/docs/implementation-roadmap.md).
+## Agent Stack
 
-Maintainer and agent operating notes live in [AGENTS.md](/Users/will/Projects/sqldbagent/AGENTS.md) and [docs/\_internal/README.md](/Users/will/Projects/sqldbagent/docs/_internal/README.md).
+sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph runtime primitives.
+
+- state is seeded from stored snapshots
+- middleware owns prompt injection, tool handling, summarization, HITL, and limits
+- Postgres checkpointing is the durable thread path
+- the dashboard uses a session-scoped memory saver when Postgres checkpointing is not enabled
+- LangSmith tracing is optional and `.env`-driven
+
+`langgraph.json` points at the local project root and `.env`, so `langgraph dev` uses the same package and tracing configuration as the rest of the repo.
+
+## Documentation
+
+Public docs live in [`docs/source`](docs/source), internal repo memory lives in [`docs/_internal`](docs/_internal), and the main contributor rules live in [`AGENTS.md`](AGENTS.md).
+
+Useful entrypoints:
+
+- [Getting Started](docs/source/getting-started.md)
+- [Configuration](docs/source/configuration.md)
+- [Agent Stack](docs/source/agent-stack.md)
+- [Publishing](docs/source/publishing.md)
+
+Build docs locally:
+
+```bash
+make docs
+make docs-live
+```
+
+## Development
+
+```bash
+trunk check --fix
+make test
+make test-integration
+make test-e2e
+```
+
+## Publishing
+
+```bash
+make build
+make publish-check
+make publish-testpypi
+make publish-pypi
+```
+
+The repo also includes GitHub Actions workflows for CI, docs builds, and trusted-publisher PyPI releases on version tags.

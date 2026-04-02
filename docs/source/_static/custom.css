@@ -1,0 +1,16 @@
+:root {
+  --color-brand-primary: #0f766e;
+  --color-brand-content: #115e59;
+}
+
+.bd-main .bd-content .bd-article-container {
+  max-width: 62rem;
+}
+
+.sd-card {
+  border-radius: 1rem;
+}
+
+.sd-card .sd-card-header {
+  font-weight: 700;
+}
