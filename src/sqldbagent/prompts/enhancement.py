@@ -67,6 +67,7 @@ class PromptEnhancementService:
                 active=existing.active,
                 user_context=existing.user_context,
                 business_rules=existing.business_rules,
+                additional_effective_context=existing.additional_effective_context,
                 answer_style=existing.answer_style,
                 created_at=existing.created_at,
             )
@@ -79,6 +80,7 @@ class PromptEnhancementService:
         active: bool,
         user_context: str | None,
         business_rules: str | None,
+        additional_effective_context: str | None,
         answer_style: str | None,
         refresh_generated: bool = False,
     ) -> PromptEnhancementModel:
@@ -89,6 +91,8 @@ class PromptEnhancementService:
             active: Whether the enhancement should be used at runtime.
             user_context: User-provided domain context.
             business_rules: User-provided business rules or caveats.
+            additional_effective_context: Extra prompt instructions that should
+                be merged directly into the effective system prompt.
             answer_style: User-provided answer-style guidance.
             refresh_generated: Whether DB-aware guidance should be regenerated.
 
@@ -105,6 +109,9 @@ class PromptEnhancementService:
                 "active": active,
                 "user_context": _normalize_optional_text(user_context),
                 "business_rules": _normalize_optional_text(business_rules),
+                "additional_effective_context": _normalize_optional_text(
+                    additional_effective_context
+                ),
                 "answer_style": _normalize_optional_text(answer_style),
                 "updated_at": datetime.now(UTC),
             }
@@ -203,6 +210,7 @@ class PromptEnhancementService:
         active: bool = True,
         user_context: str | None = None,
         business_rules: str | None = None,
+        additional_effective_context: str | None = None,
         answer_style: str | None = None,
         created_at: datetime | None = None,
     ) -> PromptEnhancementModel:
@@ -213,6 +221,8 @@ class PromptEnhancementService:
             active: Whether the enhancement is active.
             user_context: User-provided domain context.
             business_rules: User-provided business rules or caveats.
+            additional_effective_context: Extra prompt instructions that should
+                be merged directly into the effective system prompt.
             answer_style: User-provided answer-style guidance.
             created_at: Original creation timestamp when refreshing an artifact.
 
@@ -230,6 +240,9 @@ class PromptEnhancementService:
             generated_context=self._build_generated_context(snapshot),
             user_context=_normalize_optional_text(user_context),
             business_rules=_normalize_optional_text(business_rules),
+            additional_effective_context=_normalize_optional_text(
+                additional_effective_context
+            ),
             answer_style=_normalize_optional_text(answer_style),
         )
         return enhancement.model_copy(
@@ -313,6 +326,13 @@ def render_prompt_enhancement_text(
         sections.extend(["USER CONTEXT:", enhancement.user_context])
     if enhancement.business_rules:
         sections.extend(["BUSINESS RULES AND CAVEATS:", enhancement.business_rules])
+    if enhancement.additional_effective_context:
+        sections.extend(
+            [
+                "ADDITIONAL EFFECTIVE PROMPT CONTEXT:",
+                enhancement.additional_effective_context,
+            ]
+        )
     if enhancement.answer_style:
         sections.extend(["ANSWER STYLE:", enhancement.answer_style])
     return "\n".join(section for section in sections if section.strip())
@@ -555,6 +575,7 @@ def _build_enhancement_summary(enhancement: PromptEnhancementModel) -> str:
         for value in (
             enhancement.user_context,
             enhancement.business_rules,
+            enhancement.additional_effective_context,
             enhancement.answer_style,
         )
         if value
