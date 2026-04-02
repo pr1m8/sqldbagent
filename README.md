@@ -43,14 +43,14 @@ That means:
 - normalized inspection of servers, schemas, tables, and views
 - profiling with row counts, distinct/null stats, samples, storage hints, and entity heuristics
 - distinct-value lookup as a first-class profile surface for categorical columns
-- guarded sync and async SQL execution
+- guarded sync and async SQL execution with a read-only default and explicit opt-in writable mode when datasource policy allows it
 - snapshot persistence with per-datasource and per-schema storage
 - snapshot diffing, docs export, Mermaid ER export, and prompt export
-- prompt-enhancement artifacts that merge DB-aware guidance with saved user context
+- prompt-enhancement artifacts that merge DB-aware guidance, saved user context, live explored context, and cached token budgets
 - Qdrant-backed retrieval over stored snapshot documents
-- LangChain tools and LangGraph agent builders with middleware, checkpointing, long-term store memory, and optional LangSmith tracing
+- LangChain tools and LangGraph agent builders with dialect-aware runtime context, middleware, checkpointing, long-term store memory, and optional LangSmith tracing
 - FastMCP server surface
-- Streamlit dashboard chat surface with chat, schema diagram, prompt review, and saved-thread reuse over the same persisted agent stack
+- Streamlit dashboard chat surface with chat, schema diagram, prompt review, retrieval management, query execution, token budgets, and saved-thread reuse over the same persisted agent stack
 - streamed dashboard turn progress, optional thread naming, and first-run annotation capture for new datasource/schema contexts
 
 ## Install
@@ -92,10 +92,12 @@ The dashboard includes:
 - a persisted chat tab over the guarded agent stack
 - streamed progress updates while the agent is planning, calling tools, and finalizing the answer
 - snapshot-aware example questions to help start a useful conversation quickly
-- a schema tab that uses a light Mermaid visual as the primary schema render, with Graphviz as a secondary structural view
-- a prompt tab for reviewing the base/effective prompt, saving prompt context, and regenerating additional schema-aware prompt guidance on demand
+- a schema tab with an interactive graph, a generated PNG/SVG schema-image fallback, Mermaid source, and Graphviz structural view
+- a prompt tab for reviewing the base/effective prompt, saving prompt context, regenerating schema-aware prompt guidance on demand, and running live prompt exploration against the active database
 - the prompt tab can also inject additional effective-prompt instructions that are stored per datasource/schema and merged into the final system prompt
-- a retrieval tab for loading or rebuilding the active snapshot's vector index when you want retrieval ready before first use
+- a token-budget view for the base prompt, final prompt, enhancement layers, and live explored context
+- a retrieval tab for loading or rebuilding the active snapshot's vector index when you want retrieval ready before first use, using the latest saved snapshot even when the thread state is still sparse
+- a query tab for guarded sync/async SQL with explicit access-mode selection and a read-only default
 - a threads tab plus sidebar selector for reopening saved conversations
 - optional saved thread names so important conversations are easier to reopen later
 - a sidebar onboarding form for initial datasource/schema annotations when the context is still new
@@ -106,11 +108,13 @@ sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph r
 
 - state is seeded from stored snapshots
 - middleware owns prompt injection, stored prompt-enhancement merging, tool handling, summarization, HITL, and limits
+- prompt bundles and prompt enhancements cache token estimates so prompt size can be reviewed before agent runs
 - Postgres checkpointing is the durable thread path
 - Postgres-backed LangGraph store memory can persist datasource/schema context, remembered notes, and prompt instructions across threads
 - `make dashboard-demo` and `make langgraph-dev-demo` prefer the Postgres checkpoint plus Postgres store path for durable demo memory and fall back to a session store only when store config is unavailable
 - the dashboard still uses the guarded read-only database path while it streams turn progress in the UI
 - Postgres gets connection-level read-only sessions; MSSQL uses guarded SQL plus `ApplicationIntent=ReadOnly` on ODBC-style connections when datasource safety is read-only
+- writable SQL is still exceptional: it must be requested explicitly and only works when datasource policy enables writes
 - LangSmith tracing is optional and `.env`-driven
 
 `langgraph.json` points at the local project root and `.env`, so `langgraph dev` uses the same package and tracing configuration as the rest of the repo.

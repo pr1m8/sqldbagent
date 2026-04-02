@@ -32,3 +32,15 @@ make dashboard-demo
 ```
 
 `make dashboard-demo` prefers durable Postgres checkpointing and durable Postgres-backed long-term memory for demo threads when the local persistence configuration is available.
+
+## Query Posture
+
+- `sqldbagent query run` and `sqldbagent query run-async` default to guarded read-only execution.
+- Writable execution is supported only when the datasource safety policy enables it and the caller requests it explicitly.
+- The dashboard query tab follows the same shared query service and safety layer instead of bypassing it.
+
+## Prompt And Retrieval Workflow
+
+- `sqldbagent prompt export` writes durable JSON and Markdown prompt artifacts for the latest saved snapshot.
+- Prompt artifacts include cached token estimates so prompt size can be reviewed before agent use.
+- Retrieval indexes are built from saved snapshot documents, not from ad hoc live query results.
