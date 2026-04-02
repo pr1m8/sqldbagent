@@ -35,20 +35,37 @@ class QueryGuardService:
             QueryGuardResult: Lint result.
         """
 
-        return self._evaluate(sql, apply_guard=False)
+        return self._evaluate(
+            sql,
+            apply_guard=False,
+            access_mode="read_only",
+        )
 
-    def guard(self, sql: str, *, max_rows: int | None = None) -> QueryGuardResult:
+    def guard(
+        self,
+        sql: str,
+        *,
+        max_rows: int | None = None,
+        access_mode: str = "read_only",
+    ) -> QueryGuardResult:
         """Parse, validate, and normalize SQL under the active policy.
 
         Args:
             sql: SQL text to guard.
             max_rows: Optional row-limit override for this evaluation.
+            access_mode: Requested execution mode, either `read_only` or
+                `writable`.
 
         Returns:
             QueryGuardResult: Guard result.
         """
 
-        return self._evaluate(sql, apply_guard=True, max_rows=max_rows)
+        return self._evaluate(
+            sql,
+            apply_guard=True,
+            max_rows=max_rows,
+            access_mode=access_mode,
+        )
 
     def _evaluate(
         self,
@@ -56,6 +73,7 @@ class QueryGuardService:
         *,
         apply_guard: bool,
         max_rows: int | None = None,
+        access_mode: str,
     ) -> QueryGuardResult:
         """Evaluate a SQL statement.
 
@@ -63,6 +81,7 @@ class QueryGuardService:
             sql: SQL text to evaluate.
             apply_guard: Whether guard rewrites should be applied.
             max_rows: Optional row-limit override.
+            access_mode: Requested execution mode.
 
         Returns:
             QueryGuardResult: Evaluation result.
@@ -75,6 +94,9 @@ class QueryGuardService:
             if max_rows is None
             else self._policy.model_copy(update={"max_rows": max_rows})
         )
+        normalized_access_mode = (
+            "writable" if access_mode.strip().lower() == "writable" else "read_only"
+        )
 
         try:
             statements = [
@@ -86,6 +108,7 @@ class QueryGuardService:
             return QueryGuardResult(
                 allowed=False,
                 dialect=self._dialect.value,
+                access_mode=normalized_access_mode,
                 original_sql=sql,
                 reasons=[str(exc)],
                 summary="Query failed to parse.",
@@ -95,6 +118,7 @@ class QueryGuardService:
             return QueryGuardResult(
                 allowed=False,
                 dialect=self._dialect.value,
+                access_mode=normalized_access_mode,
                 original_sql=sql,
                 reasons=["exactly one SQL statement is required"],
                 summary="Query rejected because multiple statements were provided.",
@@ -111,22 +135,30 @@ class QueryGuardService:
             exp=exp,
             policy=policy,
             referenced_schemas=referenced_schemas,
+            access_mode=normalized_access_mode,
+        )
+        warnings = self._collect_warnings(
+            policy=policy,
+            access_mode=normalized_access_mode,
         )
 
         if reasons:
             return QueryGuardResult(
                 allowed=False,
                 dialect=self._dialect.value,
+                access_mode=normalized_access_mode,
                 original_sql=sql,
                 statement_type=statement_type,
                 normalized_sql=statement.sql(dialect=self._sqlglot_dialect),
                 max_rows=policy.max_rows,
                 referenced_schemas=referenced_schemas,
                 referenced_tables=referenced_tables,
+                warnings=warnings,
                 reasons=reasons,
                 summary=self._summarize_result(
                     allowed=False,
                     statement_type=statement_type,
+                    access_mode=normalized_access_mode,
                     referenced_tables=referenced_tables,
                     reasons=reasons,
                 ),
@@ -135,7 +167,7 @@ class QueryGuardService:
         guarded = statement.copy()
         row_limit_applied = False
 
-        if apply_guard:
+        if apply_guard and isinstance(guarded, exp.Query):
             limit_expression = guarded.args.get("limit")
             has_limit = limit_expression is not None
 
@@ -151,6 +183,7 @@ class QueryGuardService:
         return QueryGuardResult(
             allowed=True,
             dialect=self._dialect.value,
+            access_mode=normalized_access_mode,
             original_sql=sql,
             statement_type=statement_type,
             normalized_sql=guarded.sql(dialect=self._sqlglot_dialect),
@@ -158,9 +191,11 @@ class QueryGuardService:
             max_rows=policy.max_rows,
             referenced_schemas=referenced_schemas,
             referenced_tables=referenced_tables,
+            warnings=warnings,
             summary=self._summarize_result(
                 allowed=True,
                 statement_type=statement_type,
+                access_mode=normalized_access_mode,
                 referenced_tables=referenced_tables,
                 reasons=[],
             ),
@@ -173,6 +208,7 @@ class QueryGuardService:
         exp: Any,
         policy: SafetySettings,
         referenced_schemas: list[str],
+        access_mode: str,
     ) -> list[str]:
         """Collect validation failures for a statement.
 
@@ -188,7 +224,12 @@ class QueryGuardService:
 
         reasons: list[str] = []
 
-        if policy.read_only and not isinstance(statement, exp.Query):
+        if access_mode == "writable" and not policy.allow_writes:
+            reasons.append(
+                "writable access mode is unavailable for this datasource policy"
+            )
+
+        if access_mode == "read_only" and not isinstance(statement, exp.Query):
             reasons.append("only read-only query statements are allowed")
 
         if policy.allowed_schemas:
@@ -205,10 +246,6 @@ class QueryGuardService:
                 )
 
         disallowed_node_names = [
-            "Delete",
-            "Update",
-            "Insert",
-            "Merge",
             "Create",
             "Drop",
             "Alter",
@@ -221,6 +258,15 @@ class QueryGuardService:
             "Call",
         ]
 
+        if access_mode == "read_only":
+            disallowed_node_names = [
+                "Delete",
+                "Update",
+                "Insert",
+                "Merge",
+                *disallowed_node_names,
+            ]
+
         for node_name in disallowed_node_names:
             node_type = getattr(exp, node_name, None)
             if node_type is not None and statement.find(node_type):
@@ -229,6 +275,25 @@ class QueryGuardService:
                 )
 
         return reasons
+
+    def _collect_warnings(
+        self,
+        *,
+        policy: SafetySettings,
+        access_mode: str,
+    ) -> list[str]:
+        """Collect non-blocking warnings for a statement evaluation."""
+
+        warnings: list[str] = []
+        if access_mode == "writable":
+            warnings.append(
+                "Writable access was requested explicitly. Review the SQL carefully before execution."
+            )
+        elif policy.allow_writes:
+            warnings.append(
+                "This datasource supports writable execution, but the current request stayed on the default read-only path."
+            )
+        return warnings
 
     def _collect_references(
         self, statement: Any, *, exp: Any
@@ -293,6 +358,7 @@ class QueryGuardService:
         *,
         allowed: bool,
         statement_type: str | None,
+        access_mode: str,
         referenced_tables: list[str],
         reasons: list[str],
     ) -> str:
@@ -301,10 +367,12 @@ class QueryGuardService:
         table_text = ", ".join(referenced_tables) if referenced_tables else "no tables"
         if allowed:
             return (
+                f"{access_mode.replace('_', ' ')} "
                 f"{statement_type or 'statement'} accepted for {self._dialect.value}; "
                 f"references {table_text}."
             )
         return (
+            f"{access_mode.replace('_', ' ')} "
             f"{statement_type or 'statement'} rejected for {self._dialect.value}: "
             + "; ".join(reasons)
         )

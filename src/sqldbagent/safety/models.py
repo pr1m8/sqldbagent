@@ -12,12 +12,14 @@ class QueryGuardResult(BaseModel):
         allowed: Whether the query passed safety validation.
         statement_type: Root SQL statement type.
         dialect: SQL dialect used for parsing and normalization.
+        access_mode: Requested access mode used for evaluation.
         original_sql: Original SQL text.
         normalized_sql: Normalized SQL text after linting or guarding.
         row_limit_applied: Whether the guard injected or reduced a row limit.
         max_rows: Maximum rows allowed by policy.
         referenced_schemas: Schemas referenced by the statement.
         referenced_tables: Tables referenced by the statement.
+        warnings: Non-blocking warnings attached to the evaluation.
         reasons: Validation failure reasons when not allowed.
         summary: Generated short summary.
     """
@@ -25,11 +27,13 @@ class QueryGuardResult(BaseModel):
     allowed: bool
     statement_type: str | None = None
     dialect: str
+    access_mode: str = "read_only"
     original_sql: str
     normalized_sql: str | None = None
     row_limit_applied: bool = False
     max_rows: int | None = None
     referenced_schemas: list[str] = Field(default_factory=list)
     referenced_tables: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
     summary: str | None = None
