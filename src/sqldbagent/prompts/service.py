@@ -23,8 +23,10 @@ from sqldbagent.prompts.enhancement import (
 from sqldbagent.prompts.models import (
     PromptBundleModel,
     PromptEnhancementModel,
+    PromptExplorationModel,
     PromptSectionModel,
 )
+from sqldbagent.prompts.tokens import estimate_prompt_bundle_tokens
 from sqldbagent.snapshot.models import SnapshotBundleModel
 
 
@@ -65,6 +67,7 @@ class SnapshotPromptService:
         """
 
         schema_name = snapshot.regenerate.schema_name
+        datasource = self._settings.get_datasource(snapshot.datasource_name)
         resolved_enhancement = (
             enhancement or self._enhancements.load_or_create_enhancement(snapshot)
         )
@@ -86,8 +89,12 @@ class SnapshotPromptService:
                 title="Active Context",
                 content=(
                     f"Datasource: {snapshot.datasource_name}\n"
+                    f"Dialect: {datasource.dialect.value}\n"
                     f"Schema: {schema_name}\n"
-                    f"Snapshot ID: {snapshot.snapshot_id}"
+                    f"Snapshot ID: {snapshot.snapshot_id}\n"
+                    "Default access mode: read_only\n"
+                    "Writable access available: "
+                    + ("yes" if datasource.safety.allow_writes else "no")
                 ),
             ),
             PromptSectionModel(
@@ -111,6 +118,12 @@ class SnapshotPromptService:
             ),
         ]
         enhancement_text = render_prompt_enhancement_text(resolved_enhancement)
+        system_prompt = create_sqldbagent_system_prompt(
+            datasource_name=snapshot.datasource_name,
+            settings=self._settings,
+            schema_name=schema_name,
+            enhancement=resolved_enhancement,
+        )
         if enhancement_text is not None:
             sections.append(
                 PromptSectionModel(
@@ -130,14 +143,15 @@ class SnapshotPromptService:
             datasource_name=snapshot.datasource_name,
             schema_name=schema_name,
             base_system_prompt=base_system_prompt,
-            system_prompt=create_sqldbagent_system_prompt(
-                datasource_name=snapshot.datasource_name,
-                settings=self._settings,
-                schema_name=schema_name,
-                enhancement=resolved_enhancement,
-            ),
+            system_prompt=system_prompt,
             sections=sections,
             enhancement=resolved_enhancement,
+            token_estimates=estimate_prompt_bundle_tokens(
+                base_system_prompt=base_system_prompt,
+                system_prompt=system_prompt,
+                enhancement_text=enhancement_text,
+                model=self._settings.llm.default_model,
+            ),
             state_seed=state_seed,
         )
         return bundle.model_copy(
@@ -237,6 +251,29 @@ class SnapshotPromptService:
             additional_effective_context=additional_effective_context,
             answer_style=answer_style,
             refresh_generated=refresh_generated,
+        )
+        self._enhancements.save_prompt_enhancement(enhancement)
+        return enhancement
+
+    def save_prompt_exploration(
+        self,
+        snapshot: SnapshotBundleModel,
+        *,
+        exploration: PromptExplorationModel,
+    ) -> PromptEnhancementModel:
+        """Persist live exploration context into the schema enhancement.
+
+        Args:
+            snapshot: Snapshot bundle backing the prompt enhancement.
+            exploration: Live exploration block to persist.
+
+        Returns:
+            PromptEnhancementModel: Updated prompt enhancement artifact.
+        """
+
+        enhancement = self._enhancements.save_exploration_context(
+            snapshot,
+            exploration=exploration,
         )
         self._enhancements.save_prompt_enhancement(enhancement)
         return enhancement
@@ -355,6 +392,13 @@ class SnapshotPromptService:
                 f"- Snapshot ID: `{bundle.snapshot_id}`",
                 f"- Summary: {bundle.summary or 'No summary available.'}",
                 "",
+                "## Token Budget",
+                "",
+                f"- Base prompt tokens: `{bundle.token_estimates.get('base_system_prompt_tokens', 'unknown')}`",
+                f"- System prompt tokens: `{bundle.token_estimates.get('system_prompt_tokens', 'unknown')}`",
+                f"- Enhancement tokens: `{bundle.token_estimates.get('enhancement_text_tokens', 'unknown')}`",
+                f"- Prompt delta tokens: `{bundle.token_estimates.get('prompt_delta_tokens', 'unknown')}`",
+                "",
                 *section_lines,
                 "## Base System Prompt",
                 "",
@@ -366,6 +410,15 @@ class SnapshotPromptService:
                 "",
                 "```json",
                 state_json,
+                "```",
+                "",
+                "## Token Estimates JSON",
+                "",
+                "```json",
+                orjson.dumps(
+                    bundle.token_estimates,
+                    option=orjson.OPT_INDENT_2,
+                ).decode(),
                 "```",
                 "",
                 "## System Prompt",
