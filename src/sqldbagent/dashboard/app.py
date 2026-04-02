@@ -1447,6 +1447,15 @@ def main() -> None:
                 st.metric("Sections", len(prompt_bundle.sections))
                 st.metric("Snapshot", prompt_bundle.snapshot_id)
                 st.metric(
+                    "Base Prompt Tokens",
+                    str(
+                        prompt_bundle.token_estimates.get(
+                            "base_system_prompt_tokens",
+                            "?",
+                        )
+                    ),
+                )
+                st.metric(
                     "System Prompt Tokens",
                     str(prompt_bundle.token_estimates.get("system_prompt_tokens", "?")),
                 )
@@ -1465,6 +1474,10 @@ def main() -> None:
                             ),
                         )
                     ),
+                )
+                st.metric(
+                    "Prompt Delta",
+                    str(prompt_bundle.token_estimates.get("prompt_delta_tokens", "?")),
                 )
                 enhancement = prompt_bundle.enhancement
                 generated_context_exists = bool(
@@ -1572,6 +1585,7 @@ def main() -> None:
                     "Effective Prompt",
                     "Base Prompt",
                     "Enhancement",
+                    "Token Budget",
                     "Sections",
                     "State Seed",
                 ]
@@ -1590,6 +1604,10 @@ def main() -> None:
                             enhancement.exploration.summary
                             or "Saved live exploration context is active for this schema."
                         )
+                    st.caption(
+                        "Effective enhancement tokens: "
+                        f"`{enhancement.token_estimates.get('effective_enhancement_tokens', '?')}`"
+                    )
                     st.write(
                         "Use this saved context to keep the dynamic prompt grounded in "
                         "schema-specific guidance and your domain notes."
@@ -1725,10 +1743,112 @@ def main() -> None:
                             use_container_width=True,
                         )
             with prompt_views[3]:
+                token_left, token_right = st.columns(2)
+                with token_left:
+                    st.subheader("Prompt Layers")
+                    st.dataframe(
+                        [
+                            {
+                                "layer": "base_system_prompt",
+                                "tokens": prompt_bundle.token_estimates.get(
+                                    "base_system_prompt_tokens"
+                                ),
+                                "characters": prompt_bundle.token_estimates.get(
+                                    "base_system_prompt_characters"
+                                ),
+                            },
+                            {
+                                "layer": "system_prompt",
+                                "tokens": prompt_bundle.token_estimates.get(
+                                    "system_prompt_tokens"
+                                ),
+                                "characters": prompt_bundle.token_estimates.get(
+                                    "system_prompt_characters"
+                                ),
+                            },
+                            {
+                                "layer": "enhancement_text",
+                                "tokens": prompt_bundle.token_estimates.get(
+                                    "enhancement_text_tokens"
+                                ),
+                                "characters": prompt_bundle.token_estimates.get(
+                                    "enhancement_characters"
+                                ),
+                            },
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                with token_right:
+                    st.subheader("Enhancement Layers")
+                    if enhancement is None:
+                        st.info("No prompt enhancement is stored for this schema yet.")
+                    else:
+                        st.dataframe(
+                            [
+                                {
+                                    "layer": "generated_context",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "generated_context_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "generated_context_characters"
+                                    ),
+                                },
+                                {
+                                    "layer": "exploration_context",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "exploration_context_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "exploration_context_characters"
+                                    ),
+                                },
+                                {
+                                    "layer": "user_context",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "user_context_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "user_context_characters"
+                                    ),
+                                },
+                                {
+                                    "layer": "business_rules",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "business_rules_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "business_rules_characters"
+                                    ),
+                                },
+                                {
+                                    "layer": "additional_effective_context",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "additional_effective_context_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "additional_effective_context_characters"
+                                    ),
+                                },
+                                {
+                                    "layer": "answer_style",
+                                    "tokens": enhancement.token_estimates.get(
+                                        "answer_style_tokens"
+                                    ),
+                                    "characters": enhancement.token_estimates.get(
+                                        "answer_style_characters"
+                                    ),
+                                },
+                            ],
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+            with prompt_views[4]:
                 for section in prompt_bundle.sections:
                     with st.expander(section.title, expanded=False):
                         st.markdown(section.content)
-            with prompt_views[4]:
+            with prompt_views[5]:
                 st.json(prompt_bundle.state_seed, expanded=False)
 
     with retrieval_tab:
