@@ -10,6 +10,7 @@ from uuid import uuid4
 import orjson
 
 from sqldbagent.adapters.langgraph.checkpoint import create_memory_checkpointer
+from sqldbagent.adapters.langgraph.store import create_memory_store
 from sqldbagent.core.config import AppSettings
 from sqldbagent.dashboard.models import (
     ChatMessageModel,
@@ -45,6 +46,36 @@ def _resolve_dashboard_checkpointer(
         checkpointer = create_memory_checkpointer()
         session_state["dashboard_checkpointer"] = checkpointer
     return checkpointer
+
+
+def _resolve_dashboard_store(
+    session_state: MutableMapping[str, object],
+    settings: AppSettings,
+) -> object | None:
+    """Resolve the dashboard long-term memory store for the active UI session.
+
+    Args:
+        session_state: Streamlit session state mapping.
+        settings: Application settings.
+
+    Returns:
+        object | None: A stable per-session memory store when Postgres memory is
+        disabled or unavailable; otherwise `None` so the service can use the
+        configured Postgres store.
+    """
+
+    if settings.agent.memory.backend == "disabled":
+        return None
+    if (
+        settings.agent.memory.backend == "postgres"
+        and settings.agent.memory.postgres_url is not None
+    ):
+        return None
+    store = session_state.get("dashboard_store")
+    if store is None:
+        store = create_memory_store()
+        session_state["dashboard_store"] = store
+    return store
 
 
 def _build_checkpoint_status(observability: dict[str, object]) -> str:
@@ -755,6 +786,7 @@ def main() -> None:
     service = DashboardChatService(
         settings=settings,
         checkpointer=_resolve_dashboard_checkpointer(st.session_state, settings),
+        store=_resolve_dashboard_store(st.session_state, settings),
     )
 
     datasource_options = [datasource.name for datasource in settings.datasources]
@@ -1012,6 +1044,12 @@ def main() -> None:
             )
         if isinstance(checkpoint_recommendation, str) and checkpoint_recommendation:
             st.caption(checkpoint_recommendation)
+        memory_status = observability.get("memory_summary")
+        if isinstance(memory_status, str) and memory_status:
+            st.write(memory_status)
+        memory_backend = observability.get("memory_backend")
+        if memory_backend:
+            st.caption(f"Memory backend: `{memory_backend}`")
         st.write(_build_database_access_status(observability))
         if observability.get("langsmith_tracing"):
             st.success("LangSmith tracing is enabled for dashboard turns.")
