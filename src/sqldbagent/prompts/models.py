@@ -35,6 +35,8 @@ class PromptEnhancementModel(BaseModel):
         generated_context: Deterministic DB-aware guidance derived from the snapshot.
         user_context: Freeform user context or domain notes layered on top.
         business_rules: Business-specific caveats, rules, or interpretation notes.
+        additional_effective_context: Extra prompt instructions merged directly
+            into the effective system prompt.
         answer_style: Preferred answer style for downstream agent responses.
     """
 
@@ -49,6 +51,7 @@ class PromptEnhancementModel(BaseModel):
     generated_context: str = ""
     user_context: str | None = None
     business_rules: str | None = None
+    additional_effective_context: str | None = None
     answer_style: str | None = None
 
 

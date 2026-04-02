@@ -209,6 +209,7 @@ class SnapshotPromptService:
         active: bool,
         user_context: str | None,
         business_rules: str | None,
+        additional_effective_context: str | None,
         answer_style: str | None,
         refresh_generated: bool = False,
     ) -> PromptEnhancementModel:
@@ -219,6 +220,8 @@ class SnapshotPromptService:
             active: Whether the enhancement should be active.
             user_context: Freeform user context or domain notes.
             business_rules: Business rules and caveats.
+            additional_effective_context: Extra instructions that should be
+                merged directly into the effective system prompt.
             answer_style: Preferred answer style for downstream outputs.
             refresh_generated: Whether to force DB-guidance regeneration.
 
@@ -231,6 +234,7 @@ class SnapshotPromptService:
             active=active,
             user_context=user_context,
             business_rules=business_rules,
+            additional_effective_context=additional_effective_context,
             answer_style=answer_style,
             refresh_generated=refresh_generated,
         )
