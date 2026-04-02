@@ -16,6 +16,7 @@ Stable repo memory should capture:
 - test strategy: Postgres and MSSQL are real integration targets, SQLite is smoke-only
 - safety rule: all agent-facing SQL must go through the safety layer
 - docs rule: internal contributor process belongs in `docs/_internal`
+- internal docs should keep general agent-platform guidance separate from dashboard-surface notes
 - public docs rule: stable user-facing documentation belongs in `docs/source`
 - introspection scope is intentionally large and should grow toward server, database, schema, table, view, constraints, indexes, routines, grants, comments, sizes, and storage metadata
 - snapshot storage is the durable multi-server introspection cache; persisted artifacts should be organized per datasource/schema and loadable later from an index
@@ -47,6 +48,7 @@ Stable repo memory should capture:
 - Make targets should cover the common LangGraph flows directly: dev, demo-dev, dockerized up, debug, and runtime/checkpoint test entrypoints
 - FastMCP serving should be settings-driven through `.env` with CLI overrides, not hard-coded transport choices
 - the first chat UI surface is the Streamlit dashboard over persisted LangGraph thread IDs, not a separate frontend app
+- internal dashboard notes should live under `docs/_internal/dashboard`, while reusable LangChain v1 / LangGraph patterns should live under `docs/_internal/agent-platform-kit` and the internal `agents` index
 - live integration and E2E tests should load datasource config from `.env`, not rely only on raw exported shell variables
 - `langgraph.json` should rely on the local project `pyproject.toml` for dependencies instead of duplicating package names
 - LangSmith tracing should stay optional, `.env`-driven, and enabled through first-class settings rather than scattered env checks

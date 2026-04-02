@@ -74,6 +74,9 @@ Use it for:
 - skills setup and inventory
 - local development workflows
 - architecture decisions before they are promoted into public docs
+- moveable internal skill bundles that are intended to be copied into other repos or local skill directories
+- agent-platform notes under `docs/_internal/agents/` and `docs/_internal/agent-platform-kit/`
+- dashboard-surface notes under `docs/_internal/dashboard/`
 
 Do not use it for:
 
@@ -106,6 +109,12 @@ Recommended local baseline for this repo:
 
 These improve implementation quality, but the codebase must still remain usable without them.
 
+For reusable agent-platform work that may later move beyond this repo, prefer
+the portable skill-style bundle in
+[`docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md`](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md)
+and its `references/` folder instead of scattering the guidance across ad hoc
+notes.
+
 ## Memory Rules
 
 Treat the following as stable repo memory:
@@ -125,6 +134,8 @@ Treat the following as stable repo memory:
 - keep dashboard thread names, onboarding annotations, and streamed progress grounded in shared services and persisted artifacts rather than transient UI-only state
 - keep dashboard retrieval and schema views resilient: resolve the active snapshot from persisted artifacts when state is sparse, and keep a server-rendered image fallback available when Mermaid rendering is unreliable
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
+- keep generalized LangChain v1 / LangGraph platform guidance in the moveable internal blueprint and skill bundle under `docs/_internal/agent-platform-kit/`, so it can be lifted into other repos without rewriting the same patterns
+- keep repo-specific dashboard notes under `docs/_internal/dashboard/` instead of mixing them into the general agent-platform material
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.
 
