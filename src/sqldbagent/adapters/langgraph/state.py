@@ -35,6 +35,8 @@ class SQLDBAgentContext(TypedDict):
     latest_snapshot_summary: NotRequired[str | None]
     prompt_enhancement_active: NotRequired[bool]
     prompt_enhancement_summary: NotRequired[str | None]
+    remembered_context_active: NotRequired[bool]
+    remembered_context_summary: NotRequired[str | None]
 
 
 class SQLDBAgentState(AgentState[Any]):
@@ -46,5 +48,7 @@ class SQLDBAgentState(AgentState[Any]):
     latest_snapshot_summary: NotRequired[str | None]
     prompt_enhancement_active: NotRequired[bool]
     prompt_enhancement_summary: NotRequired[str | None]
+    remembered_context_active: NotRequired[bool]
+    remembered_context_summary: NotRequired[str | None]
     dashboard_payload: NotRequired[DashboardPayload]
     tool_call_digest: NotRequired[list[str]]
