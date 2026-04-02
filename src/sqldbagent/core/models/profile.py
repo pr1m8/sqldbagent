@@ -39,6 +39,36 @@ class ColumnProfileModel(BaseModel):
     summary: str | None = None
 
 
+class ColumnUniqueValuesModel(BaseModel):
+    """Normalized unique-values payload for one column.
+
+    Attributes:
+        database: Optional database name containing the table.
+        schema_name: Optional schema containing the table.
+        table_name: Table name containing the column.
+        column_name: Column name whose values were inspected.
+        row_count: Exact table row count when available.
+        null_count: Exact null count for the column when available.
+        non_null_count: Exact non-null count for the column when available.
+        unique_value_count: Exact number of distinct non-null values.
+        values: Distinct values with their frequencies.
+        truncated: Whether `values` was limited by the caller-supplied cap.
+        summary: Generated short summary.
+    """
+
+    database: str | None = None
+    schema_name: str | None = None
+    table_name: str
+    column_name: str
+    row_count: int | None = None
+    null_count: int | None = None
+    non_null_count: int | None = None
+    unique_value_count: int | None = None
+    values: list[dict[str, object]] = Field(default_factory=list)
+    truncated: bool = False
+    summary: str | None = None
+
+
 class TableProfileModel(BaseModel):
     """Normalized cheap table profile.
 
