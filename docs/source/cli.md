@@ -7,6 +7,7 @@ The CLI is the first-class operator surface for sqldbagent.
 - `sqldbagent config validate`
 - `sqldbagent inspect ...`
 - `sqldbagent profile ...`
+- `sqldbagent profile unique-values ...`
 - `sqldbagent query ...`
 - `sqldbagent snapshot ...`
 - `sqldbagent diagram ...`
@@ -30,4 +31,4 @@ make demo-rag-query
 make dashboard-demo
 ```
 
-`make dashboard-demo` prefers durable Postgres checkpointing for demo threads when the local checkpoint configuration is available.
+`make dashboard-demo` prefers durable Postgres checkpointing and durable Postgres-backed long-term memory for demo threads when the local persistence configuration is available.

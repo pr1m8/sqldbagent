@@ -17,7 +17,8 @@ LANGGRAPH_DEBUG_PORT ?= 5678
 LANGGRAPH_IMAGE ?= sqldbagent-langgraph:dev
 LANGGRAPH_LOG_LEVEL ?= info
 DEMO_ENV = POSTGRES_DEMO_HOST=$(DEMO_HOST) POSTGRES_DEMO_PORT=$(DEMO_PORT) POSTGRES_DEMO_DB=$(DEMO_DB) POSTGRES_DEMO_USER=$(DEMO_USER) POSTGRES_DEMO_PASSWORD=$(DEMO_PASSWORD) SQLDBAGENT_DEFAULT_DATASOURCE=postgres_demo SQLDBAGENT_DEFAULT_SCHEMA=$(DEMO_SCHEMA)
-DASHBOARD_DEMO_ENV = $(DEMO_ENV) SQLDBAGENT_AGENT_CHECKPOINT_BACKEND=postgres SQLDBAGENT_AGENT_CHECKPOINT_AUTO_SETUP=true
+PERSISTED_AGENT_DEMO_ENV = $(DEMO_ENV) SQLDBAGENT_AGENT_CHECKPOINT_BACKEND=postgres SQLDBAGENT_AGENT_CHECKPOINT_AUTO_SETUP=true SQLDBAGENT_AGENT_MEMORY_BACKEND=postgres SQLDBAGENT_AGENT_MEMORY_AUTO_SETUP=true
+DASHBOARD_DEMO_ENV = $(PERSISTED_AGENT_DEMO_ENV)
 LANGGRAPH_DEV_ARGS = --config $(LANGGRAPH_CONFIG) --host $(LANGGRAPH_HOST) --port $(LANGGRAPH_PORT) --server-log-level $(LANGGRAPH_LOG_LEVEL) --no-browser --allow-blocking
 LANGGRAPH_UP_ARGS = --config $(LANGGRAPH_CONFIG) --port $(LANGGRAPH_PORT) --no-pull
 
@@ -135,7 +136,7 @@ langgraph-dev:
 	$(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS)
 
 langgraph-dev-demo:
-	$(DEMO_ENV) $(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS)
+	$(PERSISTED_AGENT_DEMO_ENV) $(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS)
 
 langgraph-debug:
 	$(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS) --debug-port $(LANGGRAPH_DEBUG_PORT) --wait-for-client
@@ -144,13 +145,13 @@ langgraph-up:
 	$(PDM) run langgraph up $(LANGGRAPH_UP_ARGS)
 
 langgraph-up-demo:
-	$(DEMO_ENV) $(PDM) run langgraph up $(LANGGRAPH_UP_ARGS)
+	$(PERSISTED_AGENT_DEMO_ENV) $(PDM) run langgraph up $(LANGGRAPH_UP_ARGS)
 
 langgraph-build:
 	$(PDM) run langgraph build --config $(LANGGRAPH_CONFIG) --tag $(LANGGRAPH_IMAGE) --no-pull
 
 langgraph-test:
-	$(PDM) run pytest --no-cov tests/integration/test_langgraph_runtime.py tests/integration/test_langgraph_agent_checkpoint.py
+	$(PDM) run pytest --no-cov tests/integration/test_langgraph_runtime.py tests/integration/test_langgraph_agent_checkpoint.py tests/integration/test_langgraph_agent_memory.py
 
 dashboard-demo:
 	$(DASHBOARD_DEMO_ENV) $(PDM) run sqldbagent dashboard serve --datasource postgres_demo --schema public

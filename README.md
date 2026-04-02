@@ -42,12 +42,13 @@ That means:
 - datasource config and engine factories through Pydantic Settings and `.env`
 - normalized inspection of servers, schemas, tables, and views
 - profiling with row counts, distinct/null stats, samples, storage hints, and entity heuristics
+- distinct-value lookup as a first-class profile surface for categorical columns
 - guarded sync and async SQL execution
 - snapshot persistence with per-datasource and per-schema storage
 - snapshot diffing, docs export, Mermaid ER export, and prompt export
 - prompt-enhancement artifacts that merge DB-aware guidance with saved user context
 - Qdrant-backed retrieval over stored snapshot documents
-- LangChain tools and LangGraph agent builders with middleware, checkpointing, and optional LangSmith tracing
+- LangChain tools and LangGraph agent builders with middleware, checkpointing, long-term store memory, and optional LangSmith tracing
 - FastMCP server surface
 - Streamlit dashboard chat surface with chat, schema diagram, prompt review, and saved-thread reuse over the same persisted agent stack
 - streamed dashboard turn progress, optional thread naming, and first-run annotation capture for new datasource/schema contexts
@@ -80,6 +81,7 @@ Run the common workflow:
 ```bash
 pdm run sqldbagent inspect tables postgres_demo --schema public
 pdm run sqldbagent snapshot create postgres_demo public
+pdm run sqldbagent profile unique-values postgres_demo customers segment --schema public
 pdm run sqldbagent prompt export postgres_demo public
 make langgraph-dev-demo
 make dashboard-demo
@@ -105,7 +107,8 @@ sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph r
 - state is seeded from stored snapshots
 - middleware owns prompt injection, stored prompt-enhancement merging, tool handling, summarization, HITL, and limits
 - Postgres checkpointing is the durable thread path
-- `make dashboard-demo` prefers the Postgres checkpoint path for durable demo threads and falls back to a session saver only when checkpoint config is unavailable
+- Postgres-backed LangGraph store memory can persist datasource/schema context, remembered notes, and prompt instructions across threads
+- `make dashboard-demo` and `make langgraph-dev-demo` prefer the Postgres checkpoint plus Postgres store path for durable demo memory and fall back to a session store only when store config is unavailable
 - the dashboard still uses the guarded read-only database path while it streams turn progress in the UI
 - Postgres gets connection-level read-only sessions; MSSQL uses guarded SQL plus `ApplicationIntent=ReadOnly` on ODBC-style connections when datasource safety is read-only
 - LangSmith tracing is optional and `.env`-driven

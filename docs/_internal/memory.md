@@ -22,6 +22,8 @@ Stable repo memory should capture:
 - prompt bundles are durable agent artifacts and should be stored beside other per-datasource/schema artifacts with both JSON and Markdown forms
 - prompt enhancements are durable per-datasource/schema artifacts and should preserve user-authored context while regenerating DB-aware guidance from newer snapshots
 - prompt enhancements should support a distinct additional effective-prompt instruction field for direct system-prompt injection without overloading domain notes or answer-style guidance
+- LangGraph long-term memory should persist canonical datasource/schema context in the store and inject it through the shared dynamic-prompt path, not through dashboard-only state
+- when long-term memory is enabled, snapshot-derived context should be able to auto-sync into the store and reuse the checkpoint Postgres database URL unless a separate store URL is configured
 - retrieval is a helper over stored snapshot documents, not the primary execution path
 - Qdrant is the default retrieval backend for indexed snapshot documents and should be raised with the main integration compose stack
 - datasource aliases are a settings-layer ergonomics feature; persisted artifacts still use canonical datasource names
@@ -36,6 +38,7 @@ Stable repo memory should capture:
 - the dashboard should expose explicit controls to regenerate schema-aware prompt context and to ensure or rebuild the retrieval index for the active stored snapshot
 - dashboard observability should report the effective checkpoint backend and fallback reason, not just the requested settings value
 - `make dashboard-demo` should prefer durable Postgres checkpointing when local checkpoint configuration is available
+- `make dashboard-demo` and `make langgraph-dev-demo` should prefer durable Postgres checkpointing plus durable Postgres-backed long-term memory when local persistence configuration is available
 - Make targets should cover the common LangGraph flows directly: dev, demo-dev, dockerized up, debug, and runtime/checkpoint test entrypoints
 - FastMCP serving should be settings-driven through `.env` with CLI overrides, not hard-coded transport choices
 - the first chat UI surface is the Streamlit dashboard over persisted LangGraph thread IDs, not a separate frontend app

@@ -29,11 +29,12 @@ That raises the local integration stack declared in `infra/compose.integration.y
 pdm run sqldbagent config validate
 pdm run sqldbagent inspect tables postgres_demo --schema public
 pdm run sqldbagent snapshot create postgres_demo public
+pdm run sqldbagent profile unique-values postgres_demo customers segment --schema public
 pdm run sqldbagent prompt export postgres_demo public
 make dashboard-demo
 ```
 
-The demo dashboard prefers durable Postgres checkpointing when local checkpoint configuration is present, and it will tell you when it has to fall back to a session-only saver.
+The demo dashboard prefers durable Postgres checkpointing and durable Postgres-backed long-term memory when local persistence configuration is present, and it will tell you when it has to fall back to session-only memory.
 
 ## What to Expect
 
