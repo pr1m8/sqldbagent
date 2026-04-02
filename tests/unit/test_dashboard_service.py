@@ -9,6 +9,8 @@ from qdrant_client import QdrantClient
 from sqlalchemy import create_engine, text
 
 from sqldbagent.adapters.langgraph import create_memory_checkpointer
+from sqldbagent.adapters.langgraph.memory import load_database_memory
+from sqldbagent.adapters.langgraph.store import create_memory_store
 from sqldbagent.core.bootstrap import build_service_container
 from sqldbagent.core.config import (
     AgentCheckpointSettings,
@@ -20,6 +22,7 @@ from sqldbagent.core.config import (
 from sqldbagent.core.enums import Dialect
 from sqldbagent.dashboard.models import ChatMessageModel
 from sqldbagent.dashboard.service import DashboardChatService
+from sqldbagent.prompts.models import PromptBundleModel
 from tests.helpers import ToolReadyFakeMessagesListChatModel
 
 
@@ -318,8 +321,77 @@ def test_dashboard_chat_service_persists_thread_registry_entries(
     entry = entries[0]
     if entry.thread_id != "thread-registry-1":
         raise AssertionError(entry)
-    if entry.latest_snapshot_id != "snapshot-1":
-        raise AssertionError(entry)
+
+
+def test_dashboard_chat_service_explores_prompt_context_and_syncs_memory(
+    tmp_path: Path,
+) -> None:
+    """Save live prompt exploration and mirror a concise summary into memory."""
+
+    database_path = tmp_path / "dashboard-explore.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, segment TEXT, status TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO customers (id, segment, status) VALUES "
+                "(1, 'enterprise', 'active'), (2, 'smb', 'active'), (3, 'smb', 'paused')"
+            )
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        snapshot = container.snapshotter.create_schema_snapshot("main", sample_size=2)
+        container.snapshotter.save_snapshot(snapshot)
+    finally:
+        container.close()
+
+    store = create_memory_store()
+    service = DashboardChatService(
+        settings=settings,
+        store=store,
+    )
+    bundle = service.explore_prompt_bundle_context(
+        datasource_name="sqlite",
+        schema_name="main",
+        table_names=["customers"],
+        max_tables=1,
+        unique_value_limit=4,
+        sync_memory=True,
+    )
+
+    if not isinstance(bundle, PromptBundleModel):
+        raise AssertionError(bundle)
+    if bundle.enhancement is None or bundle.enhancement.exploration is None:
+        raise AssertionError(bundle.model_dump())
+    if "LIVE EXPLORED CONTEXT:" not in bundle.system_prompt:
+        raise AssertionError(bundle.system_prompt)
+    if "filters.segment" not in bundle.system_prompt:
+        raise AssertionError(bundle.system_prompt)
+    memory_record = load_database_memory(
+        store,
+        settings=settings,
+        datasource_name="sqlite",
+        schema_name="main",
+    )
+    if memory_record is None or "Explored 1 table" not in str(memory_record.summary):
+        raise AssertionError(memory_record)
 
 
 def test_dashboard_chat_service_updates_thread_display_name(

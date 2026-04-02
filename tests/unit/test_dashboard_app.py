@@ -15,6 +15,7 @@ from sqldbagent.dashboard.app import (
     _build_database_access_status,
     _build_graphviz_dot,
     _build_mermaid_embed,
+    _build_plotly_schema_figure,
     _format_thread_label,
     _resolve_dashboard_checkpointer,
     _resolve_dashboard_store,
@@ -198,6 +199,43 @@ def test_build_mermaid_embed_contains_runtime_markup() -> None:
         raise AssertionError(payload)
     if "flowchart LR" not in payload:
         raise AssertionError(payload)
+
+
+def test_build_plotly_schema_figure_contains_node_trace() -> None:
+    """Build an interactive Plotly figure from the stored schema graph."""
+
+    graph = SchemaGraphModel(
+        nodes=[
+            SchemaGraphNodeModel(
+                node_id="public.users",
+                label="public.users",
+                kind="table",
+                object_name="users",
+                summary="Users table",
+                metadata={"column_count": 3, "foreign_key_count": 1},
+            ),
+            SchemaGraphNodeModel(
+                node_id="public.orders",
+                label="public.orders",
+                kind="table",
+                object_name="orders",
+                summary="Orders table",
+                metadata={"column_count": 5, "foreign_key_count": 1},
+            ),
+        ],
+        edges=[
+            SchemaGraphEdgeModel(
+                source_node_id="public.orders",
+                target_node_id="public.users",
+                label="user_id",
+            )
+        ],
+    )
+
+    figure = _build_plotly_schema_figure(graph)
+
+    if len(getattr(figure, "data", [])) < 2:
+        raise AssertionError(figure)
 
 
 def test_format_thread_label_uses_preview_and_timestamp() -> None:

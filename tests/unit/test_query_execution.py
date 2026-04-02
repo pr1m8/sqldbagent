@@ -44,6 +44,44 @@ def test_safe_query_service_executes_guarded_sync_sql() -> None:
         raise AssertionError(result.rows)
 
 
+def test_safe_query_service_executes_writable_sync_sql() -> None:
+    """Execute writable SQL only through the explicit writable path."""
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+        )
+        connection.execute(
+            text("INSERT INTO users (id, email) VALUES (1, 'a@example.com')")
+        )
+
+    service = SafeQueryService(
+        engine=engine,
+        write_engine=engine,
+        guard=QueryGuardService(
+            policy=SafetySettings(read_only=True, allow_writes=True, max_rows=10),
+            dialect=Dialect.SQLITE,
+        ),
+    )
+    result = service.run(
+        "UPDATE users SET email = 'updated@example.com' WHERE id = 1",
+        access_mode="writable",
+    )
+    with engine.connect() as connection:
+        email = connection.execute(
+            text("SELECT email FROM users WHERE id = 1")
+        ).scalar_one()
+    engine.dispose()
+
+    if not result.guard.allowed:
+        raise AssertionError(result.guard)
+    if result.rows_affected != 1:
+        raise AssertionError(result)
+    if email != "updated@example.com":
+        raise AssertionError(email)
+
+
 @pytest.mark.asyncio
 async def test_safe_query_service_executes_guarded_async_sql(tmp_path) -> None:
     """Execute guarded read-only SQL through the async path."""
