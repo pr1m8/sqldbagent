@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from sqldbagent.diagrams.models import DiagramBundleModel
 from sqldbagent.prompts.models import PromptBundleModel
+from sqldbagent.retrieval.models import RetrievalIndexManifestModel
 
 
 class ChatMessageModel(BaseModel):
@@ -28,6 +29,20 @@ class ChatMessageModel(BaseModel):
     status: str | None = None
 
 
+class DashboardTurnProgressModel(BaseModel):
+    """One dashboard progress event emitted during an agent turn.
+
+    Attributes:
+        phase: High-level execution phase such as bootstrap, tool, or response.
+        label: Short user-facing progress label.
+        detail: Optional supporting detail for the current step.
+    """
+
+    phase: str
+    label: str
+    detail: str | None = None
+
+
 class DashboardThreadEntryModel(BaseModel):
     """Persisted dashboard thread summary used for thread selection.
 
@@ -35,6 +50,7 @@ class DashboardThreadEntryModel(BaseModel):
         thread_id: Stable thread identifier used by the LangGraph checkpointer.
         datasource_name: Datasource identifier associated with the thread.
         schema_name: Optional schema focus for the thread.
+        display_name: Optional user-friendly thread title.
         created_at: First time the thread was observed by the dashboard.
         updated_at: Most recent time the dashboard refreshed the thread entry.
         message_count: Number of rendered transcript messages currently known.
@@ -46,6 +62,7 @@ class DashboardThreadEntryModel(BaseModel):
     thread_id: str
     datasource_name: str
     schema_name: str | None = None
+    display_name: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     message_count: int = 0
@@ -69,6 +86,7 @@ class ChatSessionModel(BaseModel):
         tool_call_digest: Compressed tool-call history from the agent state.
         diagram_bundle: Stored schema-diagram bundle associated with the session.
         prompt_bundle: Stored prompt bundle associated with the session.
+        retrieval_manifest: Stored retrieval-index manifest associated with the session.
         example_questions: Snapshot-aware starter questions for the dashboard chat.
         available_threads: Persisted dashboard thread summaries for selection.
     """
@@ -84,5 +102,6 @@ class ChatSessionModel(BaseModel):
     tool_call_digest: list[str] = Field(default_factory=list)
     diagram_bundle: DiagramBundleModel | None = None
     prompt_bundle: PromptBundleModel | None = None
+    retrieval_manifest: RetrievalIndexManifestModel | None = None
     example_questions: list[str] = Field(default_factory=list)
     available_threads: list[DashboardThreadEntryModel] = Field(default_factory=list)

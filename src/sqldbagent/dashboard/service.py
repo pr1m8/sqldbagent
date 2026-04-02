@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,13 +25,17 @@ from sqldbagent.adapters.langgraph.observability import (
 )
 from sqldbagent.core.bootstrap import build_service_container
 from sqldbagent.core.config import AppSettings, load_settings
+from sqldbagent.core.enums import Dialect
+from sqldbagent.core.models.query import QueryExecutionResult
 from sqldbagent.dashboard.models import (
     ChatMessageModel,
     ChatSessionModel,
     DashboardThreadEntryModel,
+    DashboardTurnProgressModel,
 )
 from sqldbagent.diagrams.models import DiagramBundleModel
 from sqldbagent.prompts.models import PromptBundleModel
+from sqldbagent.retrieval.models import RetrievalIndexManifestModel
 from sqldbagent.snapshot.models import SnapshotBundleModel
 from sqldbagent.snapshot.service import SnapshotService
 
@@ -72,6 +77,7 @@ class DashboardChatService:
         user_message: str,
         datasource_name: str,
         schema_name: str | None = None,
+        progress_callback: Callable[[DashboardTurnProgressModel], None] | None = None,
     ) -> ChatSessionModel:
         """Run one user turn through the persisted agent session.
 
@@ -80,6 +86,8 @@ class DashboardChatService:
             user_message: User message content.
             datasource_name: Datasource identifier.
             schema_name: Optional schema focus.
+            progress_callback: Optional callback used to surface progress events
+                while the agent turn is running.
 
         Returns:
             ChatSessionModel: Dashboard-ready state after the turn.
@@ -87,6 +95,19 @@ class DashboardChatService:
 
         resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
         config = {"configurable": {"thread_id": thread_id}}
+        self._emit_progress(
+            progress_callback,
+            phase="bootstrap",
+            label="Loading persisted agent context.",
+            detail=(
+                f"Datasource `{resolved_datasource}`"
+                + (
+                    f" schema `{schema_name}`."
+                    if schema_name is not None
+                    else " across visible schemas."
+                )
+            ),
+        )
         with self._agent_session(
             datasource_name=resolved_datasource,
             schema_name=schema_name,
@@ -102,10 +123,24 @@ class DashboardChatService:
                     operation="run_turn",
                 ),
             ):
-                result = agent.invoke(
-                    {"messages": [{"role": "user", "content": user_message}]},
-                    config=config,
-                )
+                try:
+                    for update in agent.stream(
+                        {"messages": [{"role": "user", "content": user_message}]},
+                        config=config,
+                        stream_mode="updates",
+                    ):
+                        for event in self._progress_events_from_update(update):
+                            self._emit_progress(progress_callback, event=event)
+                except Exception as exc:
+                    self._emit_progress(
+                        progress_callback,
+                        phase="error",
+                        label="Agent turn failed.",
+                        detail=str(exc),
+                    )
+                    raise
+                state = agent.get_state(config)
+                result = getattr(state, "values", {}) or {}
             session = self._session_from_values(
                 thread_id=thread_id,
                 datasource_name=resolved_datasource,
@@ -123,6 +158,15 @@ class DashboardChatService:
                 ),
             )
             self._upsert_thread_entry(session)
+            self._emit_progress(
+                progress_callback,
+                phase="complete",
+                label="Agent turn complete.",
+                detail=(
+                    session.latest_snapshot_summary
+                    or f"Rendered {len(session.messages)} transcript messages."
+                ),
+            )
             return session.model_copy(
                 update={
                     "available_threads": self.list_threads(
@@ -221,6 +265,106 @@ class DashboardChatService:
         ]
         return sorted(filtered, key=lambda entry: entry.updated_at, reverse=True)
 
+    def update_thread_display_name(
+        self,
+        *,
+        thread_id: str,
+        datasource_name: str,
+        schema_name: str | None,
+        display_name: str | None,
+    ) -> DashboardThreadEntryModel | None:
+        """Persist an optional user-friendly display name for one thread."""
+
+        normalized_name = None if display_name is None else display_name.strip() or None
+        entries = self._read_thread_entries()
+        for index, entry in enumerate(entries):
+            if (
+                entry.thread_id == thread_id
+                and entry.datasource_name == datasource_name
+                and entry.schema_name == schema_name
+            ):
+                updated = entry.model_copy(
+                    update={
+                        "display_name": normalized_name,
+                        "updated_at": datetime.now(UTC),
+                    }
+                )
+                entries[index] = updated
+                self._write_thread_entries(entries)
+                return updated
+        return None
+
+    def supports_async_queries(self, *, datasource_name: str) -> bool:
+        """Return whether the datasource has a supported async query path."""
+
+        datasource = self._settings.get_datasource(datasource_name)
+        url = datasource.url
+        return any(
+            [
+                url.startswith("sqlite+pysqlite://"),
+                url.startswith("mssql+pyodbc://"),
+                url.startswith("postgresql+psycopg://"),
+            ]
+        )
+
+    def run_safe_query(
+        self,
+        *,
+        datasource_name: str,
+        sql: str,
+        max_rows: int | None = None,
+        mode: str = "sync",
+    ) -> QueryExecutionResult:
+        """Run one guarded query through the shared query service.
+
+        Args:
+            datasource_name: Datasource identifier.
+            sql: SQL text to lint, guard, and execute.
+            max_rows: Optional row-limit override.
+            mode: Execution mode, either `sync` or `async`.
+
+        Returns:
+            QueryExecutionResult: Guard and execution result.
+        """
+
+        resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        if mode == "async":
+            return asyncio.run(
+                self._run_safe_query_async(
+                    datasource_name=resolved_datasource,
+                    sql=sql,
+                    max_rows=max_rows,
+                )
+            )
+
+        container = build_service_container(
+            resolved_datasource,
+            settings=self._settings,
+        )
+        try:
+            return container.query_service.run(sql, max_rows=max_rows)
+        finally:
+            container.close()
+
+    async def _run_safe_query_async(
+        self,
+        *,
+        datasource_name: str,
+        sql: str,
+        max_rows: int | None = None,
+    ) -> QueryExecutionResult:
+        """Run the async guarded query path inside an event loop."""
+
+        container = build_service_container(
+            datasource_name,
+            settings=self._settings,
+            include_async_engine=True,
+        )
+        try:
+            return await container.query_service.run_async(sql, max_rows=max_rows)
+        finally:
+            await container.aclose()
+
     def render_prompt_markdown(self, bundle: PromptBundleModel) -> str:
         """Render one stored prompt bundle as Markdown for dashboard downloads.
 
@@ -251,6 +395,7 @@ class DashboardChatService:
         active: bool,
         user_context: str | None,
         business_rules: str | None,
+        additional_effective_context: str | None,
         answer_style: str | None,
         refresh_generated: bool = False,
     ) -> PromptBundleModel | None:
@@ -262,6 +407,8 @@ class DashboardChatService:
             active: Whether the enhancement should be active.
             user_context: Freeform user context or domain notes.
             business_rules: Business rules and caveats.
+            additional_effective_context: Extra instructions that should be
+                injected directly into the effective prompt.
             answer_style: Preferred answer style for downstream outputs.
             refresh_generated: Whether DB-aware guidance should be regenerated.
 
@@ -290,6 +437,7 @@ class DashboardChatService:
                 active=active,
                 user_context=user_context,
                 business_rules=business_rules,
+                additional_effective_context=additional_effective_context,
                 answer_style=answer_style,
                 refresh_generated=refresh_generated,
             )
@@ -299,6 +447,94 @@ class DashboardChatService:
             )
             prompt_service.save_prompt_bundle(bundle)
             return bundle
+        finally:
+            container.close()
+
+    def refresh_prompt_bundle_context(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str,
+    ) -> PromptBundleModel | None:
+        """Regenerate schema-aware prompt context from the latest stored snapshot.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+
+        Returns:
+            PromptBundleModel | None: Refreshed prompt bundle, or `None` when no
+            stored snapshot exists for the schema.
+        """
+
+        resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        snapshot = self._resolve_session_snapshot(
+            datasource_name=resolved_datasource,
+            schema_name=schema_name,
+            values={},
+        )
+        if snapshot is None:
+            return None
+        container = build_service_container(
+            resolved_datasource,
+            settings=self._settings,
+        )
+        try:
+            prompt_service = container.prompt_service
+            if prompt_service is None:
+                return None
+            enhancement = prompt_service.load_or_create_enhancement(
+                snapshot,
+                refresh_generated=True,
+            )
+            bundle = prompt_service.create_prompt_bundle(
+                snapshot,
+                enhancement=enhancement,
+            )
+            prompt_service.save_prompt_bundle(bundle)
+            return bundle
+        finally:
+            container.close()
+
+    def ensure_retrieval_index(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str,
+        recreate_collection: bool = False,
+    ) -> RetrievalIndexManifestModel | None:
+        """Ensure a retrieval index exists for the latest stored schema snapshot.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+            recreate_collection: Whether to rebuild the vector collection.
+
+        Returns:
+            RetrievalIndexManifestModel | None: Saved retrieval manifest, or
+            `None` when no stored snapshot exists for the schema.
+        """
+
+        resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        snapshot = self._resolve_session_snapshot(
+            datasource_name=resolved_datasource,
+            schema_name=schema_name,
+            values={},
+        )
+        if snapshot is None:
+            return None
+        container = build_service_container(
+            resolved_datasource,
+            settings=self._settings,
+        )
+        try:
+            retrieval_service = container.retrieval_service
+            if retrieval_service is None:
+                return None
+            return retrieval_service.index_snapshot_bundle(
+                snapshot,
+                recreate_collection=recreate_collection,
+            )
         finally:
             container.close()
 
@@ -377,36 +613,278 @@ class DashboardChatService:
             schema_name=schema_name,
             messages=self._render_messages(values.get("messages", [])),
             dashboard_payload=dict(values.get("dashboard_payload") or {}),
-            observability=self._build_observability_payload(),
+            observability=self._build_observability_payload(
+                datasource_name=datasource_name
+            ),
             latest_snapshot_id=values.get("latest_snapshot_id"),
             latest_snapshot_summary=values.get("latest_snapshot_summary"),
             tool_call_digest=list(values.get("tool_call_digest") or []),
             diagram_bundle=diagram_bundle,
             prompt_bundle=prompt_bundle,
+            retrieval_manifest=self._load_retrieval_manifest(
+                datasource_name=datasource_name,
+                schema_name=schema_name,
+                values=values,
+            ),
             example_questions=self._build_example_questions(
                 snapshot=snapshot,
                 schema_name=schema_name,
             ),
         )
 
-    def _build_observability_payload(self) -> dict[str, object]:
+    def _build_observability_payload(
+        self,
+        *,
+        datasource_name: str,
+    ) -> dict[str, object]:
         """Build UI-friendly observability details for the active session.
+
+        Args:
+            datasource_name: Datasource name for dialect-aware status text.
 
         Returns:
             dict[str, object]: Checkpoint and LangSmith status details.
         """
 
         langsmith_settings = self._settings.langsmith
+        checkpoint_payload = self._build_checkpoint_observability()
         return {
-            "checkpoint_backend": self._settings.agent.checkpoint.backend,
-            "checkpoint_is_durable": self._settings.agent.checkpoint.backend
-            == "postgres",
+            **checkpoint_payload,
+            "database_access_mode": "guarded_read_only",
+            "database_access_summary": self._build_database_access_summary(
+                datasource_name=datasource_name
+            ),
             "langsmith_tracing": is_langsmith_tracing_enabled(self._settings),
             "langsmith_project": langsmith_settings.project,
             "langsmith_endpoint": langsmith_settings.endpoint,
             "langsmith_workspace_id": langsmith_settings.workspace_id,
             "langsmith_tags": list(langsmith_settings.tags),
         }
+
+    def _build_checkpoint_observability(self) -> dict[str, object]:
+        """Build checkpoint runtime details for dashboard observability."""
+
+        requested_backend = self._settings.agent.checkpoint.backend
+        checkpoint_url = self._settings.agent.checkpoint.postgres_url
+
+        if self._checkpointer is not None:
+            active_backend = (
+                self._detect_checkpointer_backend(self._checkpointer) or "memory"
+            )
+            is_durable = active_backend == "postgres"
+            is_fallback = requested_backend == "postgres" and not is_durable
+            return {
+                "checkpoint_backend": active_backend,
+                "checkpoint_requested_backend": requested_backend,
+                "checkpoint_is_durable": is_durable,
+                "checkpoint_status": (
+                    "durable"
+                    if is_durable
+                    else "fallback" if is_fallback else "session"
+                ),
+                "checkpoint_summary": (
+                    "Durable thread persistence is active through a Postgres checkpoint saver."
+                    if is_durable
+                    else (
+                        "Postgres checkpointing was requested, but the dashboard is currently using a session-only saver."
+                        if is_fallback
+                        else "Thread persistence is scoped to the current dashboard session."
+                    )
+                ),
+                "checkpoint_recommendation": (
+                    "Restart the dashboard with Postgres checkpointing enabled to make threads durable."
+                    if is_fallback
+                    else None
+                ),
+            }
+
+        if requested_backend == "postgres" and checkpoint_url is not None:
+            return {
+                "checkpoint_backend": "postgres",
+                "checkpoint_requested_backend": requested_backend,
+                "checkpoint_is_durable": True,
+                "checkpoint_status": "durable",
+                "checkpoint_summary": (
+                    "Durable thread persistence is active through the configured Postgres checkpoint database."
+                ),
+                "checkpoint_recommendation": None,
+            }
+
+        if requested_backend == "postgres":
+            return {
+                "checkpoint_backend": "memory",
+                "checkpoint_requested_backend": requested_backend,
+                "checkpoint_is_durable": False,
+                "checkpoint_status": "fallback",
+                "checkpoint_summary": (
+                    "Postgres checkpointing was requested, but no checkpoint database URL is configured, so the dashboard fell back to a session-only memory saver."
+                ),
+                "checkpoint_recommendation": (
+                    "Set `POSTGRES_*` or `SQLDBAGENT_AGENT_CHECKPOINT_POSTGRES_URL`, then restart the dashboard to make threads durable."
+                ),
+            }
+
+        return {
+            "checkpoint_backend": "memory",
+            "checkpoint_requested_backend": requested_backend,
+            "checkpoint_is_durable": False,
+            "checkpoint_status": "session",
+            "checkpoint_summary": (
+                "Thread persistence is scoped to the current dashboard session."
+            ),
+            "checkpoint_recommendation": (
+                None
+                if requested_backend == "memory"
+                else "Enable Postgres checkpointing to make threads durable."
+            ),
+        }
+
+    @staticmethod
+    def _detect_checkpointer_backend(checkpointer: object) -> str | None:
+        """Infer the backend type for an externally supplied checkpointer."""
+
+        identity = (
+            f"{checkpointer.__class__.__module__}.{checkpointer.__class__.__name__}"
+        ).lower()
+        if "postgres" in identity:
+            return "postgres"
+        if "memory" in identity or "inmemory" in identity:
+            return "memory"
+        return None
+
+    def _build_database_access_summary(self, *, datasource_name: str) -> str:
+        """Build dialect-aware read-only access guidance for the dashboard."""
+
+        try:
+            datasource = self._settings.get_datasource(datasource_name)
+        except Exception:  # noqa: BLE001
+            return "All dashboard SQL stays on the central guarded read-only execution path."
+
+        if datasource.dialect == Dialect.POSTGRES:
+            return "Guarded SQL uses Postgres read-only transactions with the configured statement timeout."
+        if datasource.dialect == Dialect.SQLITE:
+            return "Guarded SQL uses a SQLite engine with `PRAGMA query_only` enabled."
+        if datasource.dialect == Dialect.MSSQL:
+            return "Guarded SQL uses the central safety layer and requests `ApplicationIntent=ReadOnly` on MSSQL connections."
+        return (
+            "All dashboard SQL stays on the central guarded read-only execution path."
+        )
+
+    @staticmethod
+    def _emit_progress(
+        callback: Callable[[DashboardTurnProgressModel], None] | None,
+        *,
+        phase: str | None = None,
+        label: str | None = None,
+        detail: str | None = None,
+        event: DashboardTurnProgressModel | None = None,
+    ) -> None:
+        """Emit one progress event when a callback is available."""
+
+        if callback is None:
+            return
+        callback(
+            event
+            or DashboardTurnProgressModel(
+                phase=phase or "progress",
+                label=label or "Working",
+                detail=detail,
+            )
+        )
+
+    def _progress_events_from_update(
+        self,
+        update: dict[str, Any],
+    ) -> list[DashboardTurnProgressModel]:
+        """Convert one LangGraph stream update into dashboard progress events."""
+
+        events: list[DashboardTurnProgressModel] = []
+        for node_name, payload in update.items():
+            if node_name == "sqldbagent_state_seed.before_agent":
+                snapshot_id = (
+                    payload.get("latest_snapshot_id")
+                    if isinstance(payload, dict)
+                    else None
+                )
+                detail = None
+                if snapshot_id is not None:
+                    detail = f"Using stored snapshot `{snapshot_id}`."
+                events.append(
+                    DashboardTurnProgressModel(
+                        phase="bootstrap",
+                        label="Loaded datasource context.",
+                        detail=detail,
+                    )
+                )
+                continue
+            if node_name == "model":
+                events.extend(self._model_progress_events(payload))
+                continue
+            if node_name == "tools":
+                events.extend(self._tool_progress_events(payload))
+                continue
+            if node_name == "sqldbagent_tool_digest.after_agent":
+                events.append(
+                    DashboardTurnProgressModel(
+                        phase="complete",
+                        label="Summarizing tool activity.",
+                    )
+                )
+        return events
+
+    def _model_progress_events(self, payload: Any) -> list[DashboardTurnProgressModel]:
+        """Build progress events from one model step payload."""
+
+        if not isinstance(payload, dict):
+            return []
+        events: list[DashboardTurnProgressModel] = []
+        for message in payload.get("messages", []):
+            tool_calls = getattr(message, "tool_calls", None) or []
+            if tool_calls:
+                tool_names = ", ".join(
+                    str(call.get("name", "tool")) for call in tool_calls
+                )
+                events.append(
+                    DashboardTurnProgressModel(
+                        phase="planning",
+                        label=f"Planning tool calls: {tool_names}",
+                        detail=(
+                            f"{len(tool_calls)} tool call(s) prepared for this step."
+                        ),
+                    )
+                )
+                continue
+            content = self._render_content(getattr(message, "content", ""))
+            if content:
+                events.append(
+                    DashboardTurnProgressModel(
+                        phase="response",
+                        label="Drafting assistant response.",
+                        detail=self._summarize_preview(content, limit=180),
+                    )
+                )
+        return events
+
+    def _tool_progress_events(self, payload: Any) -> list[DashboardTurnProgressModel]:
+        """Build progress events from one tool step payload."""
+
+        if not isinstance(payload, dict):
+            return []
+        events: list[DashboardTurnProgressModel] = []
+        for message in payload.get("messages", []):
+            tool_name = getattr(message, "name", None) or "tool"
+            detail = self._summarize_tool_output(
+                tool_name=tool_name,
+                content=self._render_content(getattr(message, "content", "")),
+            )
+            events.append(
+                DashboardTurnProgressModel(
+                    phase="tool",
+                    label=f"Completed tool: {tool_name}",
+                    detail=detail,
+                )
+            )
+        return events
 
     def _render_messages(self, messages: list[Any]) -> list[ChatMessageModel]:
         """Convert LangChain/LangGraph messages into dashboard transcript rows."""
@@ -440,6 +918,34 @@ class DashboardChatService:
                 )
             )
         return rendered
+
+    def _summarize_tool_output(self, *, tool_name: str, content: str) -> str:
+        """Build a compact summary for one tool output payload."""
+
+        normalized = content.strip()
+        if not normalized:
+            return f"{tool_name} finished."
+        try:
+            payload = orjson.loads(normalized)
+        except orjson.JSONDecodeError:
+            return self._summarize_preview(normalized, limit=220)
+
+        if isinstance(payload, dict):
+            summary = payload.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                return summary.strip()
+            if "row_count" in payload and "columns" in payload:
+                return (
+                    f"Returned {payload.get('row_count', 0)} row(s) across "
+                    f"{len(payload.get('columns') or [])} column(s)."
+                )
+            if "rows" in payload and isinstance(payload.get("rows"), list):
+                return f"Returned {len(payload.get('rows') or [])} row(s)."
+            keys = ", ".join(sorted(str(key) for key in payload.keys())[:6])
+            return f"{tool_name} returned fields: {keys}."
+        if isinstance(payload, list):
+            return f"Returned {len(payload)} item(s)."
+        return self._summarize_preview(str(payload), limit=220)
 
     def _render_content(self, content: Any) -> str:
         """Render a LangChain message content payload into readable text."""
@@ -531,6 +1037,34 @@ class DashboardChatService:
             )
             prompt_service.save_prompt_bundle(bundle)
             return bundle
+        finally:
+            container.close()
+
+    def _load_retrieval_manifest(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str | None,
+        values: dict[str, Any],
+    ) -> RetrievalIndexManifestModel | None:
+        """Load the retrieval manifest for the current schema snapshot."""
+
+        snapshot = self._resolve_session_snapshot(
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+            values=values,
+        )
+        if snapshot is None:
+            return None
+        container = build_service_container(datasource_name, settings=self._settings)
+        try:
+            retrieval_service = container.retrieval_service
+            if retrieval_service is None:
+                return None
+            return retrieval_service.load_saved_manifest(
+                schema_name=snapshot.regenerate.schema_name,
+                snapshot_id=snapshot.snapshot_id,
+            )
         finally:
             container.close()
 
@@ -762,6 +1296,7 @@ class DashboardChatService:
             ) == entry_key:
                 entries[index] = entry.model_copy(
                     update={
+                        "display_name": entry.display_name,
                         "updated_at": now,
                         "message_count": len(session.messages),
                         "latest_snapshot_id": session.latest_snapshot_id,
@@ -776,6 +1311,7 @@ class DashboardChatService:
                 thread_id=session.thread_id,
                 datasource_name=session.datasource_name,
                 schema_name=session.schema_name,
+                display_name=None,
                 created_at=now,
                 updated_at=now,
                 message_count=len(session.messages),
