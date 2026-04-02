@@ -36,11 +36,14 @@ make dashboard-demo
 ## Query Posture
 
 - `sqldbagent query run` and `sqldbagent query run-async` default to guarded read-only execution.
+- Both query commands expose `--access-mode read_only|writable`.
 - Writable execution is supported only when the datasource safety policy enables it and the caller requests it explicitly.
 - The dashboard query tab follows the same shared query service and safety layer instead of bypassing it.
 
 ## Prompt And Retrieval Workflow
 
 - `sqldbagent prompt export` writes durable JSON and Markdown prompt artifacts for the latest saved snapshot.
+- `sqldbagent prompt enhancement show` and `sqldbagent prompt enhancement save` let you review or persist per-schema prompt context outside the dashboard.
 - Prompt artifacts include cached token estimates so prompt size can be reviewed before agent use.
+- `sqldbagent profile unique-values ...` is the fast operator surface for categorical-value inspection and the same profile signal used by prompt exploration.
 - Retrieval indexes are built from saved snapshot documents, not from ad hoc live query results.

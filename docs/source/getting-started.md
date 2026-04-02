@@ -39,10 +39,10 @@ The demo dashboard prefers durable Postgres checkpointing and durable Postgres-b
 The current dashboard flow gives you:
 
 - chat over the persisted LangGraph-backed agent
-- schema inspection through an interactive graph plus a generated image fallback
-- prompt review with token-budget breakdowns
-- live prompt exploration that saves additional database context back into the prompt artifact
-- retrieval-index management for the active saved snapshot
+- schema inspection through an interactive graph plus generated PNG/SVG fallback output when Mermaid rendering is unavailable
+- prompt review with token-budget breakdowns for the base prompt, final system prompt, saved enhancement, and live explored context
+- live prompt exploration that saves additional read-only database context back into the prompt artifact and can sync concise schema notes into long-term memory
+- retrieval-index management for the active saved snapshot, even when the current thread state has not populated snapshot identifiers yet
 - guarded query execution with read-only default behavior
 
 ## What to Expect
@@ -58,4 +58,4 @@ The current dashboard flow gives you:
 2. Export docs, diagrams, and prompt context from the stored snapshot.
 3. Optionally build retrieval indexes for snapshot documents.
 4. Use the dashboard, MCP server, or LangGraph runtime against those stored artifacts before hitting the live database again.
-5. Use live prompt exploration only when you want to enrich the stored prompt with current high-signal categorical values or join hints from read-only profiling.
+5. Use live prompt exploration only when you want to enrich the stored prompt with current high-signal categorical values, index hints, or join paths from read-only profiling.

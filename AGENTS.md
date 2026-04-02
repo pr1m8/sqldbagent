@@ -120,8 +120,10 @@ Treat the following as stable repo memory:
 - keep retrieval grounded in stored snapshot documents and stable metadata filters
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
 - keep prompt enhancements persisted, reviewable, and merged through the shared dynamic-prompt path rather than ad hoc UI logic
+- keep cached prompt token budgets durable and visible across CLI, dashboard, and agent surfaces; prefer `tiktoken` when available and deterministic fallback otherwise
 - keep LangGraph long-term memory grounded in canonical datasource/schema context and stored snapshot summaries, with Postgres-backed store memory preferred when durability matters
 - keep dashboard thread names, onboarding annotations, and streamed progress grounded in shared services and persisted artifacts rather than transient UI-only state
+- keep dashboard retrieval and schema views resilient: resolve the active snapshot from persisted artifacts when state is sparse, and keep a server-rendered image fallback available when Mermaid rendering is unreliable
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.

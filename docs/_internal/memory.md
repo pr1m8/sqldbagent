@@ -22,10 +22,14 @@ Stable repo memory should capture:
 - prompt bundles are durable agent artifacts and should be stored beside other per-datasource/schema artifacts with both JSON and Markdown forms
 - prompt enhancements are durable per-datasource/schema artifacts and should preserve user-authored context while regenerating DB-aware guidance from newer snapshots
 - prompt enhancements should support a distinct additional effective-prompt instruction field for direct system-prompt injection without overloading domain notes or answer-style guidance
+- prompt bundles and prompt enhancements should cache token budgets for the base prompt, effective prompt, and enhancement layers so prompt size is inspectable without recomputing it every run
+- token estimation should prefer `tiktoken` when available and fall back to a deterministic approximation when it is not
 - LangGraph long-term memory should persist canonical datasource/schema context in the store and inject it through the shared dynamic-prompt path, not through dashboard-only state
 - when long-term memory is enabled, snapshot-derived context should be able to auto-sync into the store and reuse the checkpoint Postgres database URL unless a separate store URL is configured
+- live prompt exploration is a persisted read-only context layer that can be merged into prompt enhancements and optionally summarized into long-term memory; it is not a transient UI-only note
 - retrieval is a helper over stored snapshot documents, not the primary execution path
 - Qdrant is the default retrieval backend for indexed snapshot documents and should be raised with the main integration compose stack
+- dashboard retrieval should resolve the active stored snapshot from persisted prompt or diagram artifacts when thread state has not populated snapshot identifiers yet
 - datasource aliases are a settings-layer ergonomics feature; persisted artifacts still use canonical datasource names
 - LangChain v1 should be used through our own strict tool surface and LangGraph checkpointers, not via the generic SQL toolkit as the primary execution path
 - local Postgres is the standard agent checkpoint target when persistence is enabled, but it should be treated as separate persistence infrastructure from inspected target databases
@@ -36,6 +40,7 @@ Stable repo memory should capture:
 - saved dashboard threads should support optional user-friendly names and remain reloadable through the shared thread registry
 - new datasource/schema contexts should offer a lightweight initial annotation path so prompt enhancement starts with human context instead of waiting for a later prompt-only workflow
 - the dashboard should expose explicit controls to regenerate schema-aware prompt context and to ensure or rebuild the retrieval index for the active stored snapshot
+- the dashboard schema surface should always provide a server-rendered image fallback when Mermaid rendering is unavailable or inconsistent
 - dashboard observability should report the effective checkpoint backend and fallback reason, not just the requested settings value
 - `make dashboard-demo` should prefer durable Postgres checkpointing when local checkpoint configuration is available
 - `make dashboard-demo` and `make langgraph-dev-demo` should prefer durable Postgres checkpointing plus durable Postgres-backed long-term memory when local persistence configuration is available

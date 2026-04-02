@@ -47,6 +47,7 @@ That means:
 - snapshot persistence with per-datasource and per-schema storage
 - snapshot diffing, docs export, Mermaid ER export, and prompt export
 - prompt-enhancement artifacts that merge DB-aware guidance, saved user context, live explored context, and cached token budgets
+- prompt token estimation with `tiktoken` when available and a deterministic approximate fallback when it is not
 - Qdrant-backed retrieval over stored snapshot documents
 - LangChain tools and LangGraph agent builders with dialect-aware runtime context, middleware, checkpointing, long-term store memory, and optional LangSmith tracing
 - FastMCP server surface
@@ -107,8 +108,9 @@ The dashboard includes:
 sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph runtime primitives.
 
 - state is seeded from stored snapshots
-- middleware owns prompt injection, stored prompt-enhancement merging, tool handling, summarization, HITL, and limits
+- middleware owns prompt injection, stored prompt-enhancement merging, remembered datasource/schema context, tool handling, summarization, HITL, and limits
 - prompt bundles and prompt enhancements cache token estimates so prompt size can be reviewed before agent runs
+- dialect-aware runtime context is exposed to tools so query mode, async support, schema policy, and write capability stay explicit
 - Postgres checkpointing is the durable thread path
 - Postgres-backed LangGraph store memory can persist datasource/schema context, remembered notes, and prompt instructions across threads
 - `make dashboard-demo` and `make langgraph-dev-demo` prefer the Postgres checkpoint plus Postgres store path for durable demo memory and fall back to a session store only when store config is unavailable

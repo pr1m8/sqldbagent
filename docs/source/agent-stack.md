@@ -17,7 +17,7 @@ sqldbagent uses LangChain v1's `create_agent(...)` interface over LangGraph runt
 The default middleware stack currently covers:
 
 - state seeding from stored snapshot context
-- dynamic prompts
+- dynamic prompts built from the base prompt, saved prompt enhancement, live explored context, and remembered datasource/schema context
 - long-term remembered datasource/schema context injection
 - tool error shaping
 - tool digest compression
@@ -37,8 +37,10 @@ The default middleware stack currently covers:
 
 - The base system prompt is always dialect-aware.
 - Saved prompt enhancements can merge generated schema guidance, user context, business rules, direct effective-prompt instructions, and live explored context.
+- Tool runtime context is also dialect-aware and surfaces the default access mode, writable support, async-query capability, statement timeout, and schema policy.
 - LangChain and LangGraph surfaces receive the same effective prompt contract rather than each surface inventing its own prompt shape.
 - Token estimates are cached on prompt artifacts so operator and dashboard surfaces can see prompt budget before running a model.
+- Prompt exploration is persisted as a named artifact layer instead of a transient dashboard-only note, so the same context can be reloaded across dashboard, CLI, LangChain, and LangGraph flows.
 
 ## LangSmith
 
