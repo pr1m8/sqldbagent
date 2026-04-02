@@ -418,6 +418,70 @@ def test_dashboard_chat_service_loads_artifact_bundles_from_snapshot(
         raise AssertionError(prompt_bundle)
 
 
+def test_dashboard_chat_service_regenerates_stale_diagram_bundle(
+    tmp_path: Path,
+) -> None:
+    """Regenerate stale stored diagram bundles from the latest snapshot."""
+
+    database_path = tmp_path / "dashboard-diagram-regenerate.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+        connection.execute(
+            text(
+                "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)"
+            )
+        )
+        connection.execute(text("""
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    team_id INTEGER NOT NULL REFERENCES teams(id),
+                    email TEXT
+                )
+                """))
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        bundle = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(bundle)
+        diagram_bundle = container.diagram_service.create_diagram_bundle(bundle)
+        stale_bundle = diagram_bundle.model_copy(
+            update={
+                "mermaid_erd": "erDiagram\n  %% stale comment-based bundle",
+                "content_hash": "stale",
+            }
+        )
+        container.diagram_service.save_diagram_bundle(stale_bundle)
+    finally:
+        container.close()
+
+    service = DashboardChatService(settings=settings)
+    refreshed_bundle = service._load_or_create_diagram_bundle(  # noqa: SLF001
+        datasource_name="sqlite",
+        schema_name="main",
+        values={"latest_snapshot_id": bundle.snapshot_id},
+    )
+
+    if refreshed_bundle is None:
+        raise AssertionError("Expected a refreshed diagram bundle.")
+    if "%% stale comment-based bundle" in refreshed_bundle.mermaid_erd:
+        raise AssertionError(refreshed_bundle.mermaid_erd)
+    if "direction LR" not in refreshed_bundle.mermaid_erd:
+        raise AssertionError(refreshed_bundle.mermaid_erd)
+
+
 def test_dashboard_chat_service_refreshes_prompt_bundle_context(
     tmp_path: Path,
 ) -> None:

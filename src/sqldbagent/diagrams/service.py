@@ -269,7 +269,7 @@ class SchemaDiagramService:
             str: Mermaid ER diagram text.
         """
 
-        lines = ["erDiagram"]
+        lines = ["erDiagram", "  direction LR"]
         for table in snapshot.schema_metadata.tables:
             lines.extend(
                 self._mermaid_entity_block(
@@ -279,15 +279,6 @@ class SchemaDiagramService:
                     ),
                 )
             )
-
-        if snapshot.schema_metadata.views:
-            lines.append(
-                "  %% Views captured in graph JSON but not modeled as ER entities:"
-            )
-            for view in snapshot.schema_metadata.views:
-                lines.append(
-                    f"  %% - {self._qualify_name(view.schema_name, view.name)}"
-                )
 
         table_map = {
             self._qualify_name(table.schema_name, table.name): table
@@ -336,15 +327,11 @@ class SchemaDiagramService:
                 column.name in foreign_key.columns for foreign_key in table.foreign_keys
             ):
                 flags.append("FK")
-            flag_suffix = f" {' '.join(flags)}" if flags else ""
+            flag_suffix = f" {', '.join(flags)}" if flags else ""
             lines.append(
                 f"    {self._mermaid_data_type(column.data_type)} {column.name}{flag_suffix}"
             )
         lines.append("  }")
-        lines.append(
-            f"  %% {qualified_name}: "
-            f"{(profile.summary if profile is not None else table.summary) or 'No summary available.'}"
-        )
         return lines
 
     def _relationship_connector(
@@ -382,21 +369,27 @@ class SchemaDiagramService:
         cleaned = "".join(
             character if character.isalnum() else "_" for character in qualified_name
         )
-        return cleaned.upper()
+        normalized = cleaned.upper().strip("_") or "ENTITY"
+        if not normalized[0].isalpha():
+            return f"ENTITY_{normalized}"
+        return normalized
 
     @staticmethod
     def _mermaid_data_type(data_type: str) -> str:
         """Normalize a reflected SQL type into a Mermaid-friendly token."""
 
-        normalized = (
-            data_type.replace("(", "_")
-            .replace(")", "")
-            .replace(",", "_")
-            .replace(" ", "_")
-            .replace("[", "_")
-            .replace("]", "")
+        normalized = "".join(
+            (
+                character
+                if character.isalnum() or character in {"-", "_", "(", ")", "[", "]"}
+                else "_"
+            )
+            for character in data_type
         )
-        return normalized.upper()
+        normalized = normalized.upper().strip("_") or "TYPE"
+        if not normalized[0].isalpha():
+            return f"TYPE_{normalized}"
+        return normalized
 
     @staticmethod
     def _mermaid_label(label: str) -> str:

@@ -1124,9 +1124,11 @@ class DashboardChatService:
                 schema_name=snapshot.regenerate.schema_name,
                 snapshot_id=snapshot.snapshot_id,
             )
-            if bundle_path.exists():
-                return diagram_service.load_diagram_bundle(bundle_path)
             bundle = diagram_service.create_diagram_bundle(snapshot)
+            if bundle_path.exists():
+                existing_bundle = diagram_service.load_diagram_bundle(bundle_path)
+                if existing_bundle.content_hash == bundle.content_hash:
+                    return existing_bundle
             diagram_service.save_diagram_bundle(bundle)
             return bundle
         finally:

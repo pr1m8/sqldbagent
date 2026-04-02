@@ -7,6 +7,12 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 
 from sqldbagent.core.config import ArtifactSettings
+from sqldbagent.core.models.catalog import (
+    ColumnModel,
+    ForeignKeyModel,
+    TableModel,
+    UniqueConstraintModel,
+)
 from sqldbagent.diagrams.service import SchemaDiagramService
 from sqldbagent.introspect.service import SQLAlchemyInspectionService
 from sqldbagent.profile.service import SQLAlchemyProfilingService
@@ -71,7 +77,11 @@ def test_schema_diagram_service_renders_mermaid_and_graph(tmp_path: Path) -> Non
         raise AssertionError(loaded.mermaid_erd)
     if "MAIN_USERS" not in loaded.mermaid_erd:
         raise AssertionError(loaded.mermaid_erd)
+    if "direction LR" not in loaded.mermaid_erd:
+        raise AssertionError(loaded.mermaid_erd)
     if "MAIN_TEAMS ||--o{ MAIN_USERS" not in loaded.mermaid_erd:
+        raise AssertionError(loaded.mermaid_erd)
+    if "%%" in loaded.mermaid_erd:
         raise AssertionError(loaded.mermaid_erd)
     if len(loaded.graph.nodes) != 2:
         raise AssertionError(loaded.graph.nodes)
@@ -81,3 +91,30 @@ def test_schema_diagram_service_renders_mermaid_and_graph(tmp_path: Path) -> Non
         raise AssertionError(mermaid_path)
     if not graph_path.exists():
         raise AssertionError(graph_path)
+
+
+def test_schema_diagram_service_formats_multiple_mermaid_keys() -> None:
+    """Render multiple Mermaid attribute keys using Mermaid's comma syntax."""
+
+    service = SchemaDiagramService(artifacts=ArtifactSettings())
+    lines = service._mermaid_entity_block(  # noqa: SLF001
+        table=TableModel(
+            schema_name="public",
+            name="order_items",
+            columns=[
+                ColumnModel(name="id", data_type="INTEGER"),
+                ColumnModel(name="order_id", data_type="INTEGER"),
+            ],
+            primary_key=["order_id"],
+            foreign_keys=[
+                ForeignKeyModel(columns=["order_id"], referred_table="orders"),
+            ],
+            unique_constraints=[
+                UniqueConstraintModel(columns=["order_id"]),
+            ],
+        ),
+        profile=None,
+    )
+
+    if "INTEGER order_id PK, UK, FK" not in "\n".join(lines):
+        raise AssertionError(lines)
