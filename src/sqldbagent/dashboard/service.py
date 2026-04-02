@@ -17,6 +17,7 @@ from sqldbagent.adapters.langgraph.checkpoint import (
     create_memory_checkpointer,
     create_sync_postgres_checkpointer,
 )
+from sqldbagent.adapters.langgraph.memory import remember_database_context
 from sqldbagent.adapters.langgraph.model import create_runtime_chat_model
 from sqldbagent.adapters.langgraph.observability import (
     build_langsmith_metadata,
@@ -38,6 +39,7 @@ from sqldbagent.dashboard.models import (
     DashboardTurnProgressModel,
 )
 from sqldbagent.diagrams.models import DiagramBundleModel
+from sqldbagent.prompts.exploration import PromptExplorationService
 from sqldbagent.prompts.models import PromptBundleModel
 from sqldbagent.retrieval.models import RetrievalIndexManifestModel
 from sqldbagent.snapshot.models import SnapshotBundleModel
@@ -322,6 +324,7 @@ class DashboardChatService:
         sql: str,
         max_rows: int | None = None,
         mode: str = "sync",
+        access_mode: str = "read_only",
     ) -> QueryExecutionResult:
         """Run one guarded query through the shared query service.
 
@@ -330,6 +333,7 @@ class DashboardChatService:
             sql: SQL text to lint, guard, and execute.
             max_rows: Optional row-limit override.
             mode: Execution mode, either `sync` or `async`.
+            access_mode: Requested execution mode, either `read_only` or `writable`.
 
         Returns:
             QueryExecutionResult: Guard and execution result.
@@ -342,6 +346,7 @@ class DashboardChatService:
                     datasource_name=resolved_datasource,
                     sql=sql,
                     max_rows=max_rows,
+                    access_mode=access_mode,
                 )
             )
 
@@ -350,7 +355,11 @@ class DashboardChatService:
             settings=self._settings,
         )
         try:
-            return container.query_service.run(sql, max_rows=max_rows)
+            return container.query_service.run(
+                sql,
+                max_rows=max_rows,
+                access_mode=access_mode,
+            )
         finally:
             container.close()
 
@@ -360,6 +369,7 @@ class DashboardChatService:
         datasource_name: str,
         sql: str,
         max_rows: int | None = None,
+        access_mode: str,
     ) -> QueryExecutionResult:
         """Run the async guarded query path inside an event loop."""
 
@@ -369,7 +379,11 @@ class DashboardChatService:
             include_async_engine=True,
         )
         try:
-            return await container.query_service.run_async(sql, max_rows=max_rows)
+            return await container.query_service.run_async(
+                sql,
+                max_rows=max_rows,
+                access_mode=access_mode,
+            )
         finally:
             await container.aclose()
 
@@ -500,6 +514,85 @@ class DashboardChatService:
                 enhancement=enhancement,
             )
             prompt_service.save_prompt_bundle(bundle)
+            return bundle
+        finally:
+            container.close()
+
+    def explore_prompt_bundle_context(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str,
+        table_names: list[str] | None = None,
+        max_tables: int = 4,
+        unique_value_limit: int = 8,
+        sync_memory: bool = True,
+        create_snapshot_if_missing: bool = True,
+    ) -> PromptBundleModel | None:
+        """Generate live prompt context and persist it into the prompt bundle.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+            table_names: Optional explicit focus tables.
+            max_tables: Maximum number of tables to explore live.
+            unique_value_limit: Maximum number of distinct values per column.
+            sync_memory: Whether to sync a concise summary into long-term memory.
+            create_snapshot_if_missing: Whether to bootstrap a new snapshot first.
+
+        Returns:
+            PromptBundleModel | None: Updated prompt bundle, or `None` when no
+            stored snapshot exists for the schema.
+        """
+
+        resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        container = build_service_container(
+            resolved_datasource,
+            settings=self._settings,
+        )
+        try:
+            if container.prompt_service is None or container.profiler is None:
+                return None
+            snapshot = self._resolve_session_snapshot(
+                datasource_name=resolved_datasource,
+                schema_name=schema_name,
+                values={},
+            )
+            if snapshot is None:
+                if not create_snapshot_if_missing or container.snapshotter is None:
+                    return None
+                snapshot = container.snapshotter.create_schema_snapshot(
+                    schema_name=schema_name,
+                    sample_size=self._settings.profiling.default_sample_size,
+                )
+                container.snapshotter.save_snapshot(snapshot)
+            exploration = PromptExplorationService().create_exploration(
+                snapshot,
+                profiler=container.profiler,
+                table_names=table_names,
+                max_tables=max_tables,
+                unique_value_limit=unique_value_limit,
+            )
+            enhancement = container.prompt_service.save_prompt_exploration(
+                snapshot,
+                exploration=exploration,
+            )
+            if sync_memory:
+                with self._resolved_store() as store:
+                    remember_database_context(
+                        store,
+                        settings=self._settings,
+                        datasource_name=resolved_datasource,
+                        schema_name=schema_name,
+                        notes=[exploration.summary or "Saved live prompt exploration."],
+                        preferred_tables=exploration.focus_tables,
+                        merge=True,
+                    )
+            bundle = container.prompt_service.create_prompt_bundle(
+                snapshot,
+                enhancement=enhancement,
+            )
+            container.prompt_service.save_prompt_bundle(bundle)
             return bundle
         finally:
             container.close()

@@ -11,6 +11,7 @@ import orjson
 
 from sqldbagent.adapters.langgraph.checkpoint import create_memory_checkpointer
 from sqldbagent.adapters.langgraph.store import create_memory_store
+from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.config import AppSettings
 from sqldbagent.dashboard.models import (
     ChatMessageModel,
@@ -330,14 +331,16 @@ def _build_mermaid_embed(mermaid_text: str) -> str:
           );
           surface.innerHTML = renderResult.svg;
         }} catch (error) {{
+          const message = error?.message || String(error) || "Unknown Mermaid error";
           status.textContent = "Unable to render Mermaid SVG.";
-          surface.innerHTML = "<div style=\\"padding:1rem;color:#9b2c2c;font-weight:600;\\">Mermaid rendering failed.</div>";
+          surface.innerHTML = "<div style=\\"padding:1rem;color:#9b2c2c;font-weight:600;\\">Mermaid rendering failed.<br/><span style=\\"font-weight:400;white-space:pre-wrap;\\">" + message + "</span></div>";
           return;
         }}
 
         const svg = surface.querySelector("svg");
         if (!svg) {{
           status.textContent = "Unable to render Mermaid SVG.";
+          surface.innerHTML = "<div style=\\"padding:1rem;color:#9b2c2c;font-weight:600;\\">Mermaid rendering failed.<br/><span style=\\"font-weight:400;white-space:pre-wrap;\\">No SVG was returned by Mermaid.</span></div>";
           return;
         }}
 
@@ -560,6 +563,148 @@ def _build_graphviz_dot(graph: object) -> str:
 
     lines.append("}")
     return "\n".join(lines)
+
+
+def _build_plotly_schema_figure(graph: object) -> object:
+    """Build an interactive Plotly schema graph from one diagram graph payload.
+
+    Args:
+        graph: Diagram graph model with `nodes` and `edges` collections.
+
+    Returns:
+        object: Plotly figure instance for `st.plotly_chart`.
+    """
+
+    networkx = require_dependency("networkx", "networkx")
+    graph_objects = require_dependency("plotly.graph_objects", "plotly")
+
+    diagram_graph = networkx.DiGraph()
+    node_lookup = {
+        getattr(node, "node_id", ""): node for node in getattr(graph, "nodes", [])
+    }
+    for node in getattr(graph, "nodes", []):
+        diagram_graph.add_node(
+            getattr(node, "node_id", ""),
+            label=getattr(node, "label", getattr(node, "object_name", "object")),
+            kind=getattr(node, "kind", "table"),
+            summary=getattr(node, "summary", "") or "",
+        )
+    for edge in getattr(graph, "edges", []):
+        diagram_graph.add_edge(
+            getattr(edge, "source_node_id", ""),
+            getattr(edge, "target_node_id", ""),
+            label=getattr(edge, "label", "")
+            or getattr(edge, "constraint_name", "")
+            or "",
+        )
+
+    figure = graph_objects.Figure()
+    if not diagram_graph.nodes:
+        figure.update_layout(
+            margin={"l": 10, "r": 10, "t": 10, "b": 10},
+            xaxis={"visible": False},
+            yaxis={"visible": False},
+        )
+        return figure
+
+    positions = networkx.spring_layout(
+        diagram_graph,
+        seed=17,
+        k=max(0.8, 2.2 / max(1, len(diagram_graph.nodes))),
+    )
+
+    edge_x: list[float | None] = []
+    edge_y: list[float | None] = []
+    for source_node_id, target_node_id in diagram_graph.edges:
+        source_x, source_y = positions[source_node_id]
+        target_x, target_y = positions[target_node_id]
+        edge_x.extend([source_x, target_x, None])
+        edge_y.extend([source_y, target_y, None])
+
+    figure.add_trace(
+        graph_objects.Scatter(
+            x=edge_x,
+            y=edge_y,
+            mode="lines",
+            line={"color": "#6f8f88", "width": 1.5},
+            hoverinfo="skip",
+            name="relationships",
+        )
+    )
+
+    node_x: list[float] = []
+    node_y: list[float] = []
+    node_text: list[str] = []
+    node_colors: list[str] = []
+    node_sizes: list[int] = []
+    for node_id, attributes in diagram_graph.nodes(data=True):
+        x_pos, y_pos = positions[node_id]
+        node_x.append(x_pos)
+        node_y.append(y_pos)
+        summary = str(attributes.get("summary") or "")
+        label = str(attributes.get("label") or node_id)
+        kind = str(attributes.get("kind") or "table")
+        original_node = node_lookup.get(node_id)
+        metadata = (
+            {}
+            if original_node is None
+            else getattr(original_node, "metadata", {}) or {}
+        )
+        node_text.append(
+            "<br>".join(
+                part
+                for part in [
+                    f"<b>{label}</b>",
+                    f"kind={kind}",
+                    summary,
+                    (
+                        f"columns={metadata.get('column_count')}"
+                        if metadata.get("column_count") is not None
+                        else ""
+                    ),
+                    (
+                        f"relationships={metadata.get('foreign_key_count')}"
+                        if metadata.get("foreign_key_count") is not None
+                        else ""
+                    ),
+                ]
+                if part
+            )
+        )
+        node_colors.append("#1f6f64" if kind == "table" else "#b8860b")
+        node_sizes.append(26 if kind == "table" else 22)
+
+    figure.add_trace(
+        graph_objects.Scatter(
+            x=node_x,
+            y=node_y,
+            mode="markers+text",
+            text=[
+                str(attributes.get("label") or node_id)
+                for node_id, attributes in diagram_graph.nodes(data=True)
+            ],
+            textposition="top center",
+            hovertemplate="%{hovertext}<extra></extra>",
+            hovertext=node_text,
+            marker={
+                "size": node_sizes,
+                "color": node_colors,
+                "line": {"color": "#e7f6f1", "width": 1.5},
+            },
+            name="objects",
+        )
+    )
+
+    figure.update_layout(
+        showlegend=False,
+        dragmode="pan",
+        margin={"l": 10, "r": 10, "t": 24, "b": 10},
+        paper_bgcolor="#f8fcfb",
+        plot_bgcolor="#f8fcfb",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+    )
+    return figure
 
 
 def _format_thread_label(
@@ -810,6 +955,8 @@ def main() -> None:
         ).safety.max_rows
     if "dashboard_query_mode" not in st.session_state:
         st.session_state.dashboard_query_mode = "sync"
+    if "dashboard_query_access_mode" not in st.session_state:
+        st.session_state.dashboard_query_access_mode = "read_only"
     if "dashboard_query_result" not in st.session_state:
         st.session_state.dashboard_query_result = None
 
@@ -1206,10 +1353,20 @@ def main() -> None:
         else:
             st.caption(session.diagram_bundle.summary or "Stored schema diagram")
             graph = session.diagram_bundle.graph
-            visual_tab, graph_tab, graph_data_tab = st.tabs(
-                ["Visual", "Graphviz", "Graph Data"]
+            interactive_tab, mermaid_tab, graph_tab, graph_data_tab = st.tabs(
+                ["Interactive", "Mermaid", "Graphviz", "Graph Data"]
             )
-            with visual_tab:
+            with interactive_tab:
+                st.plotly_chart(
+                    _build_plotly_schema_figure(graph),
+                    use_container_width=True,
+                    config={"displaylogo": False, "scrollZoom": True},
+                )
+                st.caption(
+                    "Interactive schema view backed by the stored graph payload. "
+                    "Use Mermaid below when you want the textual ER artifact itself."
+                )
+            with mermaid_tab:
                 components.html(
                     _build_mermaid_embed(session.diagram_bundle.mermaid_erd),
                     height=860,
@@ -1289,6 +1446,26 @@ def main() -> None:
                 st.subheader("Bundle Details")
                 st.metric("Sections", len(prompt_bundle.sections))
                 st.metric("Snapshot", prompt_bundle.snapshot_id)
+                st.metric(
+                    "System Prompt Tokens",
+                    str(prompt_bundle.token_estimates.get("system_prompt_tokens", "?")),
+                )
+                st.metric(
+                    "Enhancement Tokens",
+                    str(
+                        prompt_bundle.token_estimates.get(
+                            "enhancement_text_tokens",
+                            (
+                                prompt_bundle.enhancement.token_estimates.get(
+                                    "generated_context_tokens",
+                                    "?",
+                                )
+                                if prompt_bundle.enhancement is not None
+                                else "?"
+                            ),
+                        )
+                    ),
+                )
                 enhancement = prompt_bundle.enhancement
                 generated_context_exists = bool(
                     enhancement is not None and enhancement.generated_context.strip()
@@ -1310,6 +1487,64 @@ def main() -> None:
                     else:
                         st.success("Updated additional schema context.")
                         st.rerun()
+                with st.expander("Live Prompt Exploration", expanded=False):
+                    focus_tables_csv = st.text_input(
+                        "Focus Tables (optional)",
+                        value="",
+                        help=(
+                            "Optional comma-separated list of tables to explore and "
+                            "save into the effective prompt. Leave blank to let the "
+                            "service choose the highest-signal tables."
+                        ),
+                    )
+                    live_max_tables = st.number_input(
+                        "Max Tables",
+                        min_value=1,
+                        max_value=6,
+                        value=4,
+                        step=1,
+                    )
+                    unique_value_limit = st.number_input(
+                        "Distinct Values Per Column",
+                        min_value=2,
+                        max_value=20,
+                        value=8,
+                        step=1,
+                    )
+                    sync_memory = st.checkbox(
+                        "Also sync a concise summary into long-term memory",
+                        value=True,
+                        help=(
+                            "When a store backend is configured, this saves a short "
+                            "exploration summary and preferred tables for later runs."
+                        ),
+                    )
+                    if st.button(
+                        "Explore Live DB And Save To Prompt",
+                        use_container_width=True,
+                    ):
+                        explored_bundle = service.explore_prompt_bundle_context(
+                            datasource_name=datasource_name,
+                            schema_name=schema_name or prompt_bundle.schema_name,
+                            table_names=[
+                                value.strip()
+                                for value in focus_tables_csv.split(",")
+                                if value.strip()
+                            ]
+                            or None,
+                            max_tables=int(live_max_tables),
+                            unique_value_limit=int(unique_value_limit),
+                            sync_memory=sync_memory,
+                        )
+                        if explored_bundle is None:
+                            st.error(
+                                "No stored snapshot is available yet for this schema."
+                            )
+                        else:
+                            st.success(
+                                "Saved live prompt exploration and refreshed the prompt bundle."
+                            )
+                            st.rerun()
                 st.download_button(
                     label="Download Prompt Markdown",
                     data=service.render_prompt_markdown(prompt_bundle),
@@ -1350,6 +1585,11 @@ def main() -> None:
                     st.info("No prompt enhancement is stored for this schema yet.")
                 else:
                     st.caption(enhancement.summary or "Prompt enhancement")
+                    if enhancement.exploration is not None:
+                        st.info(
+                            enhancement.exploration.summary
+                            or "Saved live exploration context is active for this schema."
+                        )
                     st.write(
                         "Use this saved context to keep the dynamic prompt grounded in "
                         "schema-specific guidance and your domain notes."
@@ -1424,13 +1664,55 @@ def main() -> None:
                             st.success("Saved prompt enhancement.")
                             st.rerun()
                     enhancement_tabs = st.tabs(
-                        ["Merged Guidance", "Generated DB Guidance", "Enhancement JSON"]
+                        [
+                            "Merged Guidance",
+                            "Generated DB Guidance",
+                            "Live Exploration",
+                            "Enhancement JSON",
+                        ]
                     )
                     with enhancement_tabs[0]:
                         st.code(prompt_bundle.system_prompt, language="text")
                     with enhancement_tabs[1]:
                         st.code(enhancement.generated_context, language="text")
                     with enhancement_tabs[2]:
+                        if enhancement.exploration is None:
+                            st.info(
+                                "No saved live exploration context exists for this schema yet."
+                            )
+                        else:
+                            st.caption(
+                                enhancement.exploration.summary
+                                or "Saved live exploration"
+                            )
+                            exploration_left, exploration_right = st.columns([2, 1])
+                            with exploration_left:
+                                st.code(
+                                    enhancement.exploration.context,
+                                    language="text",
+                                )
+                            with exploration_right:
+                                st.metric(
+                                    "Exploration Tokens",
+                                    str(
+                                        enhancement.exploration.token_estimates.get(
+                                            "token_count",
+                                            "?",
+                                        )
+                                    ),
+                                )
+                                st.metric(
+                                    "Focus Tables",
+                                    str(len(enhancement.exploration.focus_tables)),
+                                )
+                                st.write(
+                                    "\n".join(
+                                        f"- `{table_name}`"
+                                        for table_name in enhancement.exploration.focus_tables
+                                    )
+                                    or "No saved focus tables."
+                                )
+                    with enhancement_tabs[3]:
                         st.json(enhancement.model_dump(mode="json"), expanded=False)
                         st.download_button(
                             label="Download Enhancement JSON",
@@ -1512,8 +1794,9 @@ def main() -> None:
         supports_async_queries = service.supports_async_queries(
             datasource_name=resolved_query_datasource
         )
+        writable_supported = bool(datasource_config.safety.allow_writes)
         st.caption(
-            "Run guarded read-only SQL against the selected datasource. The dashboard uses the same safety and query services as the CLI and agent tools."
+            "Run guarded SQL against the selected datasource. The dashboard defaults to read-only access and uses the same safety and query services as the CLI and agent tools."
         )
         if schema_name:
             st.write(f"Current schema focus: `{schema_name}`")
@@ -1531,6 +1814,30 @@ def main() -> None:
         )
         if query_mode is not None:
             st.session_state.dashboard_query_mode = query_mode
+
+        access_mode_options = (
+            ["read_only", "writable"] if writable_supported else ["read_only"]
+        )
+        if st.session_state.dashboard_query_access_mode not in access_mode_options:
+            st.session_state.dashboard_query_access_mode = access_mode_options[0]
+        query_access_mode = st.segmented_control(
+            "Access Mode",
+            options=access_mode_options,
+            selection_mode="single",
+            default=st.session_state.dashboard_query_access_mode,
+            help=(
+                "Read-only is the default. Writable mode is only available when "
+                "the datasource policy explicitly enables writes."
+            ),
+        )
+        if query_access_mode is not None:
+            st.session_state.dashboard_query_access_mode = query_access_mode
+        if st.session_state.dashboard_query_access_mode == "writable":
+            st.warning(
+                "Writable access is explicit and higher risk. Review the SQL carefully before running it."
+            )
+        else:
+            st.info("Read-only remains the default and recommended query mode.")
 
         st.text_area(
             "SQL",
@@ -1571,6 +1878,7 @@ def main() -> None:
                     sql=st.session_state.dashboard_query_sql,
                     max_rows=int(max_rows),
                     mode=st.session_state.dashboard_query_mode,
+                    access_mode=st.session_state.dashboard_query_access_mode,
                 )
             st.session_state.dashboard_query_result = result.model_dump(mode="json")
 
