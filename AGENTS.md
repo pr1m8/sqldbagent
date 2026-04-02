@@ -43,6 +43,7 @@ If implementation pressure conflicts with the roadmap, fix the roadmap deliberat
 - Treat persisted snapshots as the reusable multi-server introspection store; prefer loading from stored artifacts when that satisfies the workflow instead of re-querying by default.
 - Treat prompt bundles as durable agent-facing artifacts derived from stored snapshots; prompts, state seeds, and Markdown companions should be reloadable and reviewable.
 - Treat prompt enhancements as durable per-datasource/schema artifacts that combine deterministic DB-aware guidance with optional user-authored context and can be regenerated from fresh snapshots.
+- Treat dashboard observability as runtime truth: report the effective checkpoint backend and any fallback reason, not just the requested configuration value.
 - Treat LangChain v1 middleware as the agent policy layer. Prompting, state seeding, tool handling, HITL, and summarization should live there instead of being scattered across callers.
 - Treat retrieval as an additive helper over stored snapshot documents, not a replacement for inspection, profiling, snapshots, or guarded SQL.
 - Treat the LangGraph checkpoint Postgres as persistence infrastructure. Local demos may reuse the same Postgres service, but real deployments should generally separate checkpoint storage from inspected application databases.
@@ -115,9 +116,11 @@ Treat the following as stable repo memory:
 - group commits by coherent feature slices and push after green validation, not as one mixed catch-all commit
 - keep adapter surfaces thin
 - keep database safety constraints central
+- keep dialect-specific read-only enforcement honest: prefer connection/session policy when the backend supports it, and fall back to the central guard plus driver-level read intent where that is the strongest reliable option
 - keep retrieval grounded in stored snapshot documents and stable metadata filters
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
 - keep prompt enhancements persisted, reviewable, and merged through the shared dynamic-prompt path rather than ad hoc UI logic
+- keep dashboard thread names, onboarding annotations, and streamed progress grounded in shared services and persisted artifacts rather than transient UI-only state
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.
