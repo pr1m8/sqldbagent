@@ -9,7 +9,11 @@ from sqlalchemy import Boolean, Engine, MetaData, Table, func, select, text
 from sqlalchemy.sql.sqltypes import JSON, LargeBinary
 
 from sqldbagent.core.config import ProfilingSettings
-from sqldbagent.core.models.profile import ColumnProfileModel, TableProfileModel
+from sqldbagent.core.models.profile import (
+    ColumnProfileModel,
+    ColumnUniqueValuesModel,
+    TableProfileModel,
+)
 from sqldbagent.core.serialization import to_jsonable
 from sqldbagent.introspect.service import SQLAlchemyInspectionService
 
@@ -151,6 +155,82 @@ class SQLAlchemyProfilingService:
                 ).mappings()
             ]
 
+    def get_unique_values(
+        self,
+        table_name: str,
+        column_name: str,
+        schema: str | None = None,
+        *,
+        limit: int = 20,
+    ) -> ColumnUniqueValuesModel:
+        """Return distinct values and counts for one column.
+
+        Args:
+            table_name: Table name to inspect.
+            column_name: Column name whose distinct values should be returned.
+            schema: Optional schema name.
+            limit: Maximum number of distinct values to return.
+
+        Returns:
+            ColumnUniqueValuesModel: Distinct-value distribution for the column.
+        """
+
+        resolved_limit = max(1, min(limit, 1_000))
+        table = self._load_table(table_name=table_name, schema=schema)
+        try:
+            column = table.columns[column_name]
+        except KeyError as exc:
+            raise KeyError(
+                f"unknown column '{column_name}' on table '{self._qualify_name(schema, table_name)}'"
+            ) from exc
+
+        with self._engine.connect() as connection:
+            row_count = int(
+                connection.execute(select(func.count()).select_from(table)).scalar_one()
+            )
+            null_count = int(
+                connection.execute(
+                    select(func.count()).select_from(table).where(column.is_(None))
+                ).scalar_one()
+            )
+            non_null_count = max(row_count - null_count, 0)
+            unique_value_count = int(
+                connection.execute(
+                    select(func.count(func.distinct(column)))
+                    .select_from(table)
+                    .where(column.is_not(None))
+                ).scalar_one()
+            )
+            values = self._top_values(
+                connection=connection,
+                table=table,
+                column=column,
+                top_value_limit=resolved_limit,
+                include_nulls=False,
+            )
+
+        return ColumnUniqueValuesModel(
+            database=self._engine.url.database,
+            schema_name=schema,
+            table_name=table_name,
+            column_name=column_name,
+            row_count=row_count,
+            null_count=null_count,
+            non_null_count=non_null_count,
+            unique_value_count=unique_value_count,
+            values=values,
+            truncated=unique_value_count > resolved_limit,
+            summary=self._summarize_unique_values(
+                table_name=table_name,
+                column_name=column_name,
+                schema=schema,
+                unique_value_count=unique_value_count,
+                null_count=null_count,
+                returned_count=len(values),
+                truncated=unique_value_count > resolved_limit,
+            ),
+        )
+
     def _profile_column(
         self,
         *,
@@ -270,6 +350,7 @@ class SQLAlchemyProfilingService:
         table: Table,
         column: Any,
         top_value_limit: int,
+        include_nulls: bool = True,
     ) -> list[dict[str, object]]:
         """Return top values and counts for one column.
 
@@ -278,6 +359,7 @@ class SQLAlchemyProfilingService:
             table: Reflected table.
             column: SQLAlchemy column object.
             top_value_limit: Number of top values to include.
+            include_nulls: Whether null values should be returned.
 
         Returns:
             list[dict[str, object]]: JSON-friendly top value payloads.
@@ -290,6 +372,8 @@ class SQLAlchemyProfilingService:
             .order_by(func.count().desc())
             .limit(top_value_limit)
         )
+        if not include_nulls:
+            statement = statement.where(column.is_not(None))
         return [
             {
                 "value": self._scalar_value(row.value),
@@ -489,6 +573,43 @@ class SQLAlchemyProfilingService:
             f"Profile for '{qualified_name}' shows {row_count} rows, {column_count} "
             f"columns, entity kind '{entity_kind}', {relationship_count} relationships, "
             f"and {storage_text}."
+        )
+
+    def _summarize_unique_values(
+        self,
+        *,
+        table_name: str,
+        column_name: str,
+        schema: str | None,
+        unique_value_count: int,
+        null_count: int,
+        returned_count: int,
+        truncated: bool,
+    ) -> str:
+        """Build a short summary for a distinct-value result.
+
+        Args:
+            table_name: Table name containing the column.
+            column_name: Column name being summarized.
+            schema: Optional schema name.
+            unique_value_count: Exact number of distinct non-null values.
+            null_count: Exact null count.
+            returned_count: Number of values returned in the payload.
+            truncated: Whether the result set was capped.
+
+        Returns:
+            str: Human-readable summary.
+        """
+
+        qualified_name = self._qualify_name(schema, table_name)
+        truncation_text = (
+            f" Returning the top {returned_count} values by frequency."
+            if truncated
+            else f" Returning all {returned_count} captured values."
+        )
+        return (
+            f"Column '{qualified_name}.{column_name}' has {unique_value_count} distinct "
+            f"non-null values and {null_count} nulls.{truncation_text}"
         )
 
     def _scalar_value(self, value: object) -> object:
