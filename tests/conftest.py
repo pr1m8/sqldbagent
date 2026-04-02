@@ -262,6 +262,100 @@ def live_qdrant_settings(configured_app_settings: AppSettings) -> AppSettings:
     return configured_app_settings
 
 
+@pytest.fixture
+def live_mssql_settings(configured_app_settings: AppSettings) -> AppSettings:
+    """Return repo settings when the configured MSSQL datasource is reachable.
+
+    Args:
+        configured_app_settings: Application settings loaded from `.env`.
+
+    Returns:
+        AppSettings: Settings with a reachable MSSQL datasource.
+    """
+
+    pytest.importorskip("pyodbc")
+    try:
+        datasource = configured_app_settings.get_datasource("mssql")
+    except ConfigurationError:
+        pytest.skip("mssql datasource is not configured in .env")
+
+    engine = create_engine(datasource.url)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"mssql datasource is unreachable: {exc}")
+    finally:
+        engine.dispose()
+
+    return configured_app_settings
+
+
+@pytest.fixture
+def live_mssql_schema(live_mssql_settings: AppSettings) -> str:
+    """Create a temporary MSSQL schema populated for live tests.
+
+    Args:
+        live_mssql_settings: Settings whose MSSQL datasource is reachable.
+
+    Yields:
+        str: Temporary schema name for the test run.
+    """
+
+    datasource = live_mssql_settings.get_datasource("mssql")
+    schema_name = f"sqldbagent_{uuid4().hex[:8]}"
+    engine = create_engine(datasource.url)
+    try:
+        with engine.begin() as connection:
+            teams_create_sql = f"""
+                    CREATE TABLE [{schema_name}].[teams] (
+                        id INT NOT NULL PRIMARY KEY,
+                        name NVARCHAR(255) NOT NULL UNIQUE
+                    )
+                    """  # nosec B608
+            users_create_sql = f"""
+                    CREATE TABLE [{schema_name}].[users] (
+                        id INT NOT NULL PRIMARY KEY,
+                        team_id INT NULL,
+                        email NVARCHAR(255) NULL,
+                        status NVARCHAR(32) NOT NULL DEFAULT 'active',
+                        CONSTRAINT [FK_{schema_name}_users_team]
+                        FOREIGN KEY(team_id) REFERENCES [{schema_name}].[teams](id)
+                    )
+                    """  # nosec B608
+            index_create_sql = f"""
+                    CREATE INDEX [IX_{schema_name}_users_team_id]
+                    ON [{schema_name}].[users](team_id)
+                    """  # nosec B608
+            connection.execute(text(f"CREATE SCHEMA [{schema_name}]"))  # nosec B608
+            connection.execute(text(teams_create_sql))
+            connection.execute(text(users_create_sql))
+            connection.execute(text(index_create_sql))
+            connection.execute(text(f"""
+                    INSERT INTO [{schema_name}].[teams] (id, name)
+                    VALUES (1, 'data')
+                    """))  # nosec B608
+            connection.execute(text(f"""
+                    INSERT INTO [{schema_name}].[users] (id, team_id, email, status)
+                    VALUES
+                        (1, 1, 'a@example.com', 'active'),
+                        (2, 1, 'b@example.com', 'active'),
+                        (3, 1, NULL, 'inactive')
+                    """))  # nosec B608
+
+        yield schema_name
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"DROP TABLE IF EXISTS [{schema_name}].[users]")  # nosec B608
+            )
+            connection.execute(
+                text(f"DROP TABLE IF EXISTS [{schema_name}].[teams]")  # nosec B608
+            )
+            connection.execute(text(f"DROP SCHEMA [{schema_name}]"))  # nosec B608
+        engine.dispose()
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
