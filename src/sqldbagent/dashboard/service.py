@@ -34,6 +34,8 @@ from sqldbagent.prompts.models import PromptBundleModel
 from sqldbagent.snapshot.models import SnapshotBundleModel
 from sqldbagent.snapshot.service import SnapshotService
 
+_MAX_EXAMPLE_QUESTIONS = 5
+
 
 class DashboardChatService:
     """Run persisted chat turns over the shared sqldbagent agent stack."""
@@ -241,6 +243,65 @@ class DashboardChatService:
         finally:
             container.close()
 
+    def update_prompt_bundle_enhancement(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str,
+        active: bool,
+        user_context: str | None,
+        business_rules: str | None,
+        answer_style: str | None,
+        refresh_generated: bool = False,
+    ) -> PromptBundleModel | None:
+        """Update prompt-enhancement state and regenerate the prompt bundle.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+            active: Whether the enhancement should be active.
+            user_context: Freeform user context or domain notes.
+            business_rules: Business rules and caveats.
+            answer_style: Preferred answer style for downstream outputs.
+            refresh_generated: Whether DB-aware guidance should be regenerated.
+
+        Returns:
+            PromptBundleModel | None: Updated prompt bundle or `None` when no
+            snapshot exists yet for the schema.
+        """
+
+        resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        snapshot = self._resolve_session_snapshot(
+            datasource_name=resolved_datasource,
+            schema_name=schema_name,
+            values={},
+        )
+        if snapshot is None:
+            return None
+        container = build_service_container(
+            resolved_datasource, settings=self._settings
+        )
+        try:
+            prompt_service = container.prompt_service
+            if prompt_service is None:
+                return None
+            enhancement = prompt_service.update_prompt_enhancement(
+                snapshot,
+                active=active,
+                user_context=user_context,
+                business_rules=business_rules,
+                answer_style=answer_style,
+                refresh_generated=refresh_generated,
+            )
+            bundle = prompt_service.create_prompt_bundle(
+                snapshot,
+                enhancement=enhancement,
+            )
+            prompt_service.save_prompt_bundle(bundle)
+            return bundle
+        finally:
+            container.close()
+
     @contextmanager
     def _agent_session(
         self,
@@ -305,6 +366,11 @@ class DashboardChatService:
     ) -> ChatSessionModel:
         """Build a dashboard chat session snapshot from agent state values."""
 
+        snapshot = self._resolve_session_snapshot(
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+            values=values,
+        )
         return ChatSessionModel(
             thread_id=thread_id,
             datasource_name=datasource_name,
@@ -317,6 +383,10 @@ class DashboardChatService:
             tool_call_digest=list(values.get("tool_call_digest") or []),
             diagram_bundle=diagram_bundle,
             prompt_bundle=prompt_bundle,
+            example_questions=self._build_example_questions(
+                snapshot=snapshot,
+                schema_name=schema_name,
+            ),
         )
 
     def _build_observability_payload(self) -> dict[str, object]:
@@ -454,14 +524,11 @@ class DashboardChatService:
             prompt_service = container.prompt_service
             if prompt_service is None:
                 return None
-            bundle_path = prompt_service.bundle_path(
-                datasource_name=datasource_name,
-                schema_name=snapshot.regenerate.schema_name,
-                snapshot_id=snapshot.snapshot_id,
+            enhancement = prompt_service.load_or_create_enhancement(snapshot)
+            bundle = prompt_service.create_prompt_bundle(
+                snapshot,
+                enhancement=enhancement,
             )
-            if bundle_path.exists():
-                return prompt_service.load_prompt_bundle(bundle_path)
-            bundle = prompt_service.create_prompt_bundle(snapshot)
             prompt_service.save_prompt_bundle(bundle)
             return bundle
         finally:
@@ -490,6 +557,145 @@ class DashboardChatService:
         if entries:
             return SnapshotService.load_snapshot(root / entries[0].path)
         return None
+
+    def _build_example_questions(
+        self,
+        *,
+        snapshot: SnapshotBundleModel | None,
+        schema_name: str | None,
+    ) -> list[str]:
+        """Build snapshot-aware starter questions for the dashboard chat.
+
+        Args:
+            snapshot: Relevant stored snapshot for the active session.
+            schema_name: Optional schema focus.
+
+        Returns:
+            list[str]: Ordered starter questions for the dashboard UI.
+        """
+
+        resolved_schema = schema_name or "default"
+        questions = [
+            f"Summarize the main entities and relationships in the {resolved_schema} schema.",
+            f"Which tables in the {resolved_schema} schema are largest by row count or storage?",
+            f"What data quality, uniqueness, or identifier signals stand out in the {resolved_schema} schema?",
+        ]
+        if snapshot is None:
+            return questions[:_MAX_EXAMPLE_QUESTIONS]
+
+        demo_questions = self._build_demo_example_questions(snapshot)
+        if demo_questions:
+            questions = [*demo_questions, *questions]
+
+        profiles_by_table = {
+            profile.table_name: profile
+            for profile in snapshot.profiles
+            if profile.schema_name == snapshot.regenerate.schema_name
+        }
+        ranked_tables = sorted(
+            snapshot.schema_metadata.tables,
+            key=lambda table: (
+                (
+                    (profiles_by_table.get(table.name).storage_bytes or 0)
+                    if profiles_by_table.get(table.name) is not None
+                    else 0
+                ),
+                (
+                    (profiles_by_table.get(table.name).row_count or 0)
+                    if profiles_by_table.get(table.name) is not None
+                    else 0
+                ),
+                (
+                    (profiles_by_table.get(table.name).relationship_count or 0)
+                    if profiles_by_table.get(table.name) is not None
+                    else 0
+                ),
+            ),
+            reverse=True,
+        )
+        if ranked_tables:
+            top_table = ranked_tables[0]
+            qualified_name = ".".join(
+                part for part in [top_table.schema_name, top_table.name] if part
+            )
+            questions.append(
+                f"Profile {qualified_name} and explain its key columns, sample rows, and likely business meaning."
+            )
+
+        if snapshot.relationship_edges:
+            edge = snapshot.relationship_edges[0]
+            source_name = ".".join(
+                part for part in [edge.source_schema, edge.source_table] if part
+            )
+            target_name = ".".join(
+                part for part in [edge.target_schema, edge.target_table] if part
+            )
+            questions.append(
+                f"How do {source_name} and {target_name} relate, and what is the safest join path between them?"
+            )
+
+        if snapshot.schema_metadata.views:
+            questions.append(
+                f"Which views in the {resolved_schema} schema are most useful, and what does each one represent?"
+            )
+
+        seen: set[str] = set()
+        unique_questions: list[str] = []
+        for question in questions:
+            if question in seen:
+                continue
+            seen.add(question)
+            unique_questions.append(question)
+            if len(unique_questions) == _MAX_EXAMPLE_QUESTIONS:
+                break
+        return unique_questions
+
+    @staticmethod
+    def _build_demo_example_questions(snapshot: SnapshotBundleModel) -> list[str]:
+        """Build tailored starter questions for the bundled demo schema.
+
+        Args:
+            snapshot: Relevant stored snapshot for the active session.
+
+        Returns:
+            list[str]: Demo-specific starter questions when the known demo
+            tables are present; otherwise an empty list.
+        """
+
+        table_names = {table.name for table in snapshot.schema_metadata.tables}
+        required_tables = {
+            "customers",
+            "orders",
+            "order_items",
+            "products",
+            "support_tickets",
+        }
+        if not required_tables.issubset(table_names):
+            return []
+
+        schema_name = snapshot.regenerate.schema_name
+        return [
+            (
+                f"Summarize the customer lifecycle in {schema_name}: how customers, "
+                "orders, order_items, products, and support_tickets connect."
+            ),
+            (
+                "Which customers look most commercially important based on order "
+                "activity, and what evidence supports that?"
+            ),
+            (
+                "Explain the safest join path to analyze revenue by customer "
+                "segment and product category."
+            ),
+            (
+                "What support-ticket patterns stand out by customer segment, "
+                "priority, and order activity?"
+            ),
+            (
+                "Profile the most important business identifiers in the demo "
+                "schema, including customer_code, order_number, sku, and ticket_number."
+            ),
+        ]
 
     @property
     def _thread_registry_path(self) -> Path:

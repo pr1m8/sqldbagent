@@ -42,6 +42,7 @@ If implementation pressure conflicts with the roadmap, fix the roadmap deliberat
 - Treat the product as a safe database intelligence core, not a generic SQL shell.
 - Treat persisted snapshots as the reusable multi-server introspection store; prefer loading from stored artifacts when that satisfies the workflow instead of re-querying by default.
 - Treat prompt bundles as durable agent-facing artifacts derived from stored snapshots; prompts, state seeds, and Markdown companions should be reloadable and reviewable.
+- Treat prompt enhancements as durable per-datasource/schema artifacts that combine deterministic DB-aware guidance with optional user-authored context and can be regenerated from fresh snapshots.
 - Treat LangChain v1 middleware as the agent policy layer. Prompting, state seeding, tool handling, HITL, and summarization should live there instead of being scattered across callers.
 - Treat retrieval as an additive helper over stored snapshot documents, not a replacement for inspection, profiling, snapshots, or guarded SQL.
 - Treat the LangGraph checkpoint Postgres as persistence infrastructure. Local demos may reuse the same Postgres service, but real deployments should generally separate checkpoint storage from inspected application databases.
@@ -116,6 +117,7 @@ Treat the following as stable repo memory:
 - keep database safety constraints central
 - keep retrieval grounded in stored snapshot documents and stable metadata filters
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
+- keep prompt enhancements persisted, reviewable, and merged through the shared dynamic-prompt path rather than ad hoc UI logic
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.
@@ -150,6 +152,10 @@ Use these repo entrypoints by default:
 - `make logs-postgres` or `make logs-mssql` for service logs
 - `make logs-qdrant` for retrieval service logs
 - `make langgraph-dev` for local LangGraph CLI runs
+- `make langgraph-dev-demo` to run the LangGraph API against the demo datasource defaults
+- `make langgraph-debug` to run LangGraph dev mode with debugger attach enabled
+- `make langgraph-up` to launch the Dockerized LangGraph API server
+- `make langgraph-build` to build the LangGraph API image from `langgraph.json`
 - `make dashboard-demo` to run the persisted demo chat dashboard
 - `make mcp-stdio` or `make mcp-http` to expose the local FastMCP server
 

@@ -69,6 +69,7 @@ class ChatSessionModel(BaseModel):
         tool_call_digest: Compressed tool-call history from the agent state.
         diagram_bundle: Stored schema-diagram bundle associated with the session.
         prompt_bundle: Stored prompt bundle associated with the session.
+        example_questions: Snapshot-aware starter questions for the dashboard chat.
         available_threads: Persisted dashboard thread summaries for selection.
     """
 
@@ -83,4 +84,5 @@ class ChatSessionModel(BaseModel):
     tool_call_digest: list[str] = Field(default_factory=list)
     diagram_bundle: DiagramBundleModel | None = None
     prompt_bundle: PromptBundleModel | None = None
+    example_questions: list[str] = Field(default_factory=list)
     available_threads: list[DashboardThreadEntryModel] = Field(default_factory=list)

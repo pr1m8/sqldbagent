@@ -45,6 +45,7 @@ That means:
 - guarded sync and async SQL execution
 - snapshot persistence with per-datasource and per-schema storage
 - snapshot diffing, docs export, Mermaid ER export, and prompt export
+- prompt-enhancement artifacts that merge DB-aware guidance with saved user context
 - Qdrant-backed retrieval over stored snapshot documents
 - LangChain tools and LangGraph agent builders with middleware, checkpointing, and optional LangSmith tracing
 - FastMCP server surface
@@ -79,14 +80,16 @@ Run the common workflow:
 pdm run sqldbagent inspect tables postgres_demo --schema public
 pdm run sqldbagent snapshot create postgres_demo public
 pdm run sqldbagent prompt export postgres_demo public
+make langgraph-dev-demo
 make dashboard-demo
 ```
 
 The dashboard includes:
 
 - a persisted chat tab over the guarded agent stack
+- snapshot-aware example questions to help start a useful conversation quickly
 - a schema tab that renders the latest stored Mermaid ER diagram
-- a prompt tab for reviewing the latest stored system prompt and state seed
+- a prompt tab for reviewing the base/effective prompt, saving prompt context, and regenerating DB-aware prompt guidance
 - a threads tab plus sidebar selector for reopening saved conversations
 
 ## Agent Stack
@@ -94,12 +97,21 @@ The dashboard includes:
 sqldbagent uses LangChain v1's `create_agent(...)` surface on top of LangGraph runtime primitives.
 
 - state is seeded from stored snapshots
-- middleware owns prompt injection, tool handling, summarization, HITL, and limits
+- middleware owns prompt injection, stored prompt-enhancement merging, tool handling, summarization, HITL, and limits
 - Postgres checkpointing is the durable thread path
 - the dashboard uses a session-scoped memory saver when Postgres checkpointing is not enabled
 - LangSmith tracing is optional and `.env`-driven
 
 `langgraph.json` points at the local project root and `.env`, so `langgraph dev` uses the same package and tracing configuration as the rest of the repo.
+
+Useful LangGraph make targets:
+
+- `make langgraph-dev` for the local API server with repo defaults
+- `make langgraph-dev-demo` to run the API server against `postgres_demo`
+- `make langgraph-debug` to wait for a debugger client before startup
+- `make langgraph-up` for the Dockerized LangGraph API server
+- `make langgraph-build` to build the LangGraph API image
+- `make langgraph-test` for the runtime and checkpoint integration tests
 
 ## Documentation
 

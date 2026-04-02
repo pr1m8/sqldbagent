@@ -6,6 +6,8 @@ from typing import Any
 
 from sqldbagent.core.config import AppSettings, load_settings
 from sqldbagent.core.models.profile import TableProfileModel
+from sqldbagent.prompts.enhancement import PromptEnhancementService
+from sqldbagent.prompts.models import PromptEnhancementModel
 from sqldbagent.snapshot.models import SnapshotBundleModel
 from sqldbagent.snapshot.service import SnapshotService
 
@@ -36,18 +38,31 @@ def build_sqldbagent_state_seed(
         settings=resolved_settings,
         schema_name=schema_name,
     )
+    prompt_enhancement = _load_prompt_enhancement(
+        datasource_name=datasource_name,
+        settings=resolved_settings,
+        schema_name=schema_name,
+        snapshot=snapshot,
+    )
     snapshot_id = snapshot.snapshot_id if snapshot is not None else None
     snapshot_summary = snapshot.summary if snapshot is not None else None
     dashboard_payload = build_sqldbagent_dashboard_payload(
         datasource_name=datasource_name,
         schema_name=schema_name,
         snapshot=snapshot,
+        prompt_enhancement=prompt_enhancement,
     )
     return {
         "datasource_name": datasource_name,
         "schema_name": schema_name,
         "latest_snapshot_id": snapshot_id,
         "latest_snapshot_summary": snapshot_summary,
+        "prompt_enhancement_active": (
+            prompt_enhancement.active if prompt_enhancement is not None else False
+        ),
+        "prompt_enhancement_summary": (
+            prompt_enhancement.summary if prompt_enhancement is not None else None
+        ),
         "dashboard_payload": dashboard_payload,
         "tool_call_digest": [],
     }
@@ -58,6 +73,7 @@ def build_sqldbagent_dashboard_payload(
     datasource_name: str,
     schema_name: str | None,
     snapshot: SnapshotBundleModel | None,
+    prompt_enhancement: PromptEnhancementModel | None = None,
 ) -> dict[str, Any]:
     """Build dashboard-oriented agent state from the latest known snapshot.
 
@@ -65,6 +81,7 @@ def build_sqldbagent_dashboard_payload(
         datasource_name: Datasource identifier.
         schema_name: Optional schema focus.
         snapshot: Optional latest stored snapshot.
+        prompt_enhancement: Optional prompt enhancement for the same scope.
 
     Returns:
         dict[str, Any]: Dashboard-friendly payload for UI surfaces.
@@ -107,6 +124,14 @@ def build_sqldbagent_dashboard_payload(
                 },
             ]
         )
+    if prompt_enhancement is not None:
+        cards.append(
+            {
+                "title": "Prompt",
+                "value": "enhanced" if prompt_enhancement.active else "stored-only",
+                "kind": "prompt",
+            }
+        )
     return {
         "headline": f"{datasource_name}:{schema_name or 'default'}",
         "cards": cards,
@@ -114,6 +139,11 @@ def build_sqldbagent_dashboard_payload(
             "Use inspection and profiling before SQL.",
             "Treat safe_query_sql as guarded read-only access.",
             "Prefer reusable summaries that can feed docs, prompts, diagrams, and dashboard views.",
+            *(
+                [prompt_enhancement.summary]
+                if prompt_enhancement is not None and prompt_enhancement.summary
+                else []
+            ),
         ],
     }
 
@@ -210,6 +240,39 @@ def build_snapshot_prompt_context(
         *(relationship_lines or ["- No relationship highlights were captured."]),
     ]
     return "\n".join(lines)
+
+
+def _load_prompt_enhancement(
+    *,
+    datasource_name: str,
+    settings: AppSettings,
+    schema_name: str | None,
+    snapshot: SnapshotBundleModel | None,
+) -> PromptEnhancementModel | None:
+    """Load prompt-enhancement context for the active datasource/schema.
+
+    Args:
+        datasource_name: Datasource identifier.
+        settings: Application settings.
+        schema_name: Optional schema focus.
+        snapshot: Optional latest snapshot for the same scope.
+
+    Returns:
+        PromptEnhancementModel | None: Saved or generated enhancement context.
+    """
+
+    if not settings.agent.enable_prompt_enhancements:
+        return None
+    if schema_name is None or snapshot is None:
+        return None
+    enhancements = PromptEnhancementService(artifacts=settings.artifacts)
+    saved = enhancements.load_saved_enhancement(
+        datasource_name=datasource_name,
+        schema_name=schema_name,
+    )
+    if saved is not None:
+        return saved
+    return enhancements.load_or_create_enhancement(snapshot)
 
 
 def _build_table_highlights(

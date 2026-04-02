@@ -262,3 +262,187 @@ def test_dashboard_chat_service_loads_artifact_bundles_from_snapshot(
         prompt_bundle
     ):
         raise AssertionError(prompt_bundle)
+
+
+def test_dashboard_chat_service_builds_example_questions_from_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Build snapshot-aware starter questions for the dashboard chat."""
+
+    database_path = tmp_path / "dashboard-example-questions.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT UNIQUE, tier TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, total_cents INTEGER, "
+                "FOREIGN KEY(customer_id) REFERENCES customers(id))"
+            )
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        bundle = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(bundle)
+    finally:
+        container.close()
+
+    service = DashboardChatService(settings=settings)
+    session = service._session_from_values(  # noqa: SLF001
+        thread_id="example-questions-thread",
+        datasource_name="sqlite",
+        schema_name="main",
+        values={"latest_snapshot_id": bundle.snapshot_id, "messages": []},
+    )
+
+    if not session.example_questions:
+        raise AssertionError(session.model_dump())
+    if not any("customers" in question for question in session.example_questions):
+        raise AssertionError(session.example_questions)
+    if not any("join path" in question for question in session.example_questions):
+        raise AssertionError(session.example_questions)
+
+
+def test_dashboard_chat_service_updates_prompt_enhancement(
+    tmp_path: Path,
+) -> None:
+    """Update prompt enhancement state through the dashboard service layer."""
+
+    database_path = tmp_path / "dashboard-prompt-enhancement.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT UNIQUE, tier TEXT)"
+            )
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        snapshot = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(snapshot)
+    finally:
+        container.close()
+
+    service = DashboardChatService(settings=settings)
+    bundle = service.update_prompt_bundle_enhancement(
+        datasource_name="sqlite",
+        schema_name="main",
+        active=True,
+        user_context="Customers are subscription tenants.",
+        business_rules="Tier drives commercial segmentation.",
+        answer_style="Use short bullets and evidence.",
+        refresh_generated=True,
+    )
+
+    if bundle is None:
+        raise AssertionError(bundle)
+    if bundle.enhancement is None:
+        raise AssertionError(bundle.model_dump())
+    if bundle.enhancement.user_context != "Customers are subscription tenants.":
+        raise AssertionError(bundle.enhancement.model_dump())
+    if "subscription tenants" not in bundle.system_prompt:
+        raise AssertionError(bundle.system_prompt)
+
+
+def test_dashboard_chat_service_builds_demo_specific_example_questions(
+    tmp_path: Path,
+) -> None:
+    """Prefer richer starter questions when the bundled demo schema is present."""
+
+    database_path = tmp_path / "dashboard-demo-example-questions.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, customer_code TEXT, segment TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, category TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, order_number TEXT, "
+                "FOREIGN KEY(customer_id) REFERENCES customers(id))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, "
+                "FOREIGN KEY(order_id) REFERENCES orders(id), "
+                "FOREIGN KEY(product_id) REFERENCES products(id))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE support_tickets (id INTEGER PRIMARY KEY, customer_id INTEGER, ticket_number TEXT, "
+                "FOREIGN KEY(customer_id) REFERENCES customers(id))"
+            )
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        bundle = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(bundle)
+    finally:
+        container.close()
+
+    service = DashboardChatService(settings=settings)
+    session = service._session_from_values(  # noqa: SLF001
+        thread_id="demo-example-questions-thread",
+        datasource_name="sqlite",
+        schema_name="main",
+        values={"latest_snapshot_id": bundle.snapshot_id, "messages": []},
+    )
+
+    if not any(
+        "customer lifecycle" in question for question in session.example_questions
+    ):
+        raise AssertionError(session.example_questions)
+    if not any(
+        "support-ticket patterns" in question for question in session.example_questions
+    ):
+        raise AssertionError(session.example_questions)

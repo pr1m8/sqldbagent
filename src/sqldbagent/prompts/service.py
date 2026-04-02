@@ -7,13 +7,24 @@ from pathlib import Path
 
 import orjson
 
-from sqldbagent.adapters.langgraph.prompts import create_sqldbagent_system_prompt
+from sqldbagent.adapters.langgraph.prompts import (
+    create_sqldbagent_base_system_prompt,
+    create_sqldbagent_system_prompt,
+)
 from sqldbagent.core.agent_context import (
     build_snapshot_prompt_context,
     build_sqldbagent_state_seed,
 )
 from sqldbagent.core.config import AppSettings, ArtifactSettings, load_settings
-from sqldbagent.prompts.models import PromptBundleModel, PromptSectionModel
+from sqldbagent.prompts.enhancement import (
+    PromptEnhancementService,
+    render_prompt_enhancement_text,
+)
+from sqldbagent.prompts.models import (
+    PromptBundleModel,
+    PromptEnhancementModel,
+    PromptSectionModel,
+)
 from sqldbagent.snapshot.models import SnapshotBundleModel
 
 
@@ -35,18 +46,33 @@ class SnapshotPromptService:
 
         self._artifacts = artifacts
         self._settings = settings or load_settings()
+        self._enhancements = PromptEnhancementService(artifacts=artifacts)
 
-    def create_prompt_bundle(self, snapshot: SnapshotBundleModel) -> PromptBundleModel:
+    def create_prompt_bundle(
+        self,
+        snapshot: SnapshotBundleModel,
+        *,
+        enhancement: PromptEnhancementModel | None = None,
+    ) -> PromptBundleModel:
         """Build a persisted prompt bundle for one snapshot.
 
         Args:
             snapshot: Snapshot bundle to export.
+            enhancement: Optional preloaded prompt enhancement.
 
         Returns:
             PromptBundleModel: Durable prompt bundle for the snapshot.
         """
 
         schema_name = snapshot.regenerate.schema_name
+        resolved_enhancement = (
+            enhancement or self._enhancements.load_or_create_enhancement(snapshot)
+        )
+        base_system_prompt = create_sqldbagent_base_system_prompt(
+            datasource_name=snapshot.datasource_name,
+            settings=self._settings,
+            schema_name=schema_name,
+        )
         sections = [
             PromptSectionModel(
                 title="Role",
@@ -84,21 +110,34 @@ class SnapshotPromptService:
                 ),
             ),
         ]
+        enhancement_text = render_prompt_enhancement_text(resolved_enhancement)
+        if enhancement_text is not None:
+            sections.append(
+                PromptSectionModel(
+                    title="Prompt Enhancement",
+                    content=enhancement_text,
+                )
+            )
         state_seed = build_sqldbagent_state_seed(
             datasource_name=snapshot.datasource_name,
             settings=self._settings,
             schema_name=schema_name,
         )
+        state_seed["prompt_enhancement_active"] = resolved_enhancement.active
+        state_seed["prompt_enhancement_summary"] = resolved_enhancement.summary
         bundle = PromptBundleModel(
             snapshot_id=snapshot.snapshot_id,
             datasource_name=snapshot.datasource_name,
             schema_name=schema_name,
+            base_system_prompt=base_system_prompt,
             system_prompt=create_sqldbagent_system_prompt(
                 datasource_name=snapshot.datasource_name,
                 settings=self._settings,
                 schema_name=schema_name,
+                enhancement=resolved_enhancement,
             ),
             sections=sections,
+            enhancement=resolved_enhancement,
             state_seed=state_seed,
         )
         return bundle.model_copy(
@@ -139,6 +178,113 @@ class SnapshotPromptService:
             snapshot_id=bundle.snapshot_id,
         ).write_text(self.render_markdown(bundle), encoding="utf-8")
         return bundle_path
+
+    def load_or_create_enhancement(
+        self,
+        snapshot: SnapshotBundleModel,
+        *,
+        refresh_generated: bool = False,
+    ) -> PromptEnhancementModel:
+        """Load or create the prompt enhancement for one snapshot.
+
+        Args:
+            snapshot: Snapshot bundle backing the enhancement.
+            refresh_generated: Whether to force DB-guidance regeneration.
+
+        Returns:
+            PromptEnhancementModel: Stored or generated enhancement artifact.
+        """
+
+        enhancement = self._enhancements.load_or_create_enhancement(
+            snapshot,
+            refresh_generated=refresh_generated,
+        )
+        self._enhancements.save_prompt_enhancement(enhancement)
+        return enhancement
+
+    def update_prompt_enhancement(
+        self,
+        snapshot: SnapshotBundleModel,
+        *,
+        active: bool,
+        user_context: str | None,
+        business_rules: str | None,
+        answer_style: str | None,
+        refresh_generated: bool = False,
+    ) -> PromptEnhancementModel:
+        """Update and persist the prompt enhancement for one snapshot.
+
+        Args:
+            snapshot: Snapshot bundle backing the enhancement.
+            active: Whether the enhancement should be active.
+            user_context: Freeform user context or domain notes.
+            business_rules: Business rules and caveats.
+            answer_style: Preferred answer style for downstream outputs.
+            refresh_generated: Whether to force DB-guidance regeneration.
+
+        Returns:
+            PromptEnhancementModel: Persisted enhancement artifact.
+        """
+
+        enhancement = self._enhancements.update_enhancement(
+            snapshot,
+            active=active,
+            user_context=user_context,
+            business_rules=business_rules,
+            answer_style=answer_style,
+            refresh_generated=refresh_generated,
+        )
+        self._enhancements.save_prompt_enhancement(enhancement)
+        return enhancement
+
+    def save_prompt_enhancement(self, enhancement: PromptEnhancementModel) -> Path:
+        """Persist one prompt-enhancement artifact.
+
+        Args:
+            enhancement: Enhancement artifact to persist.
+
+        Returns:
+            Path: Saved enhancement path.
+        """
+
+        return self._enhancements.save_prompt_enhancement(enhancement)
+
+    def load_saved_enhancement(
+        self,
+        *,
+        datasource_name: str,
+        schema_name: str,
+    ) -> PromptEnhancementModel | None:
+        """Load a saved prompt enhancement when one exists.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+
+        Returns:
+            PromptEnhancementModel | None: Saved enhancement or `None`.
+        """
+
+        return self._enhancements.load_saved_enhancement(
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+        )
+
+    def enhancement_path(self, *, datasource_name: str, schema_name: str) -> Path:
+        """Return the persisted prompt-enhancement path.
+
+        Args:
+            datasource_name: Datasource identifier.
+            schema_name: Schema name.
+
+        Returns:
+            Path: Enhancement JSON path.
+        """
+
+        return self._enhancements.enhancement_path(
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+        )
 
     @staticmethod
     def load_prompt_bundle(path: str | Path) -> PromptBundleModel:
@@ -206,6 +352,12 @@ class SnapshotPromptService:
                 f"- Summary: {bundle.summary or 'No summary available.'}",
                 "",
                 *section_lines,
+                "## Base System Prompt",
+                "",
+                "```text",
+                bundle.base_system_prompt,
+                "```",
+                "",
                 "## State Seed",
                 "",
                 "```json",

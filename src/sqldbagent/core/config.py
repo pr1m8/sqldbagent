@@ -79,6 +79,7 @@ class ArtifactSettings(BaseModel):
         documents_dir: Document-export subdirectory under `root_dir`.
         diagrams_dir: Diagram-export subdirectory under `root_dir`.
         prompts_dir: Prompt-export subdirectory under `root_dir`.
+        prompt_enhancements_dir: Prompt-enhancement subdirectory under `root_dir`.
         embeddings_cache_dir: Embedding cache subdirectory under `root_dir`.
         vectorstores_dir: Retrieval/vectorstore manifest subdirectory under `root_dir`.
     """
@@ -90,6 +91,7 @@ class ArtifactSettings(BaseModel):
     documents_dir: str = "documents"
     diagrams_dir: str = "diagrams"
     prompts_dir: str = "prompts"
+    prompt_enhancements_dir: str = "prompt-enhancements"
     embeddings_cache_dir: str = "embeddings-cache"
     vectorstores_dir: str = "vectorstores"
 
@@ -288,6 +290,8 @@ class AgentSettings(BaseModel):
         summarization_model: Optional dedicated model identifier for summarization.
         tool_call_digest_limit: Maximum number of compressed tool-call summaries to retain.
         checkpoint: Agent checkpoint persistence settings.
+        enable_prompt_enhancements: Whether dynamic prompts should merge saved
+            prompt-enhancement artifacts.
     """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -304,6 +308,7 @@ class AgentSettings(BaseModel):
     summarization_model: str | None = None
     tool_call_digest_limit: int = Field(default=10, ge=1)
     checkpoint: AgentCheckpointSettings = Field(default_factory=AgentCheckpointSettings)
+    enable_prompt_enhancements: bool = True
 
 
 class MCPSettings(BaseModel):

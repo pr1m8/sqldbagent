@@ -10,9 +10,17 @@ DEMO_PASSWORD ?= sqldbagent
 DEMO_SCHEMA ?= public
 DEMO_QUERY ?= Which tables model customers, orders, and support tickets?
 DOCS_LOCALE ?= en_US.UTF-8
-DEMO_ENV = POSTGRES_DEMO_HOST=$(DEMO_HOST) POSTGRES_DEMO_PORT=$(DEMO_PORT) POSTGRES_DEMO_DB=$(DEMO_DB) POSTGRES_DEMO_USER=$(DEMO_USER) POSTGRES_DEMO_PASSWORD=$(DEMO_PASSWORD) SQLDBAGENT_DEFAULT_DATASOURCE=postgres_demo
+LANGGRAPH_CONFIG ?= langgraph.json
+LANGGRAPH_HOST ?= 127.0.0.1
+LANGGRAPH_PORT ?= 8123
+LANGGRAPH_DEBUG_PORT ?= 5678
+LANGGRAPH_IMAGE ?= sqldbagent-langgraph:dev
+LANGGRAPH_LOG_LEVEL ?= info
+DEMO_ENV = POSTGRES_DEMO_HOST=$(DEMO_HOST) POSTGRES_DEMO_PORT=$(DEMO_PORT) POSTGRES_DEMO_DB=$(DEMO_DB) POSTGRES_DEMO_USER=$(DEMO_USER) POSTGRES_DEMO_PASSWORD=$(DEMO_PASSWORD) SQLDBAGENT_DEFAULT_DATASOURCE=postgres_demo SQLDBAGENT_DEFAULT_SCHEMA=$(DEMO_SCHEMA)
+LANGGRAPH_DEV_ARGS = --config $(LANGGRAPH_CONFIG) --host $(LANGGRAPH_HOST) --port $(LANGGRAPH_PORT) --server-log-level $(LANGGRAPH_LOG_LEVEL) --no-browser --allow-blocking
+LANGGRAPH_UP_ARGS = --config $(LANGGRAPH_CONFIG) --port $(LANGGRAPH_PORT) --no-pull
 
-.PHONY: install install-all fix check build publish-check publish-testpypi publish-pypi docs docs-live docs-linkcheck docs-clean test test-unit test-integration test-e2e test-e2e-postgres test-integration-postgres test-integration-agent test-integration-retrieval up up-advanced down ps logs-postgres logs-postgres-demo logs-mssql logs-qdrant db-up db-up-postgres db-up-postgres-demo db-up-mssql db-up-qdrant db-down db-ps db-logs-postgres db-logs-postgres-demo db-logs-mssql db-logs-qdrant langgraph-dev dashboard-demo mcp-stdio mcp-http demo-up demo-migrate demo-current demo-history demo-inspect demo-snapshot demo-diagram demo-prompt demo-rag-index demo-rag-query
+.PHONY: install install-all fix check build publish-check publish-testpypi publish-pypi docs docs-live docs-linkcheck docs-clean test test-unit test-integration test-e2e test-e2e-postgres test-integration-postgres test-integration-agent test-integration-retrieval up up-advanced down ps logs-postgres logs-postgres-demo logs-mssql logs-qdrant db-up db-up-postgres db-up-postgres-demo db-up-mssql db-up-qdrant db-down db-ps db-logs-postgres db-logs-postgres-demo db-logs-mssql db-logs-qdrant langgraph-dev langgraph-dev-demo langgraph-debug langgraph-up langgraph-up-demo langgraph-build langgraph-test dashboard-demo mcp-stdio mcp-http demo-up demo-migrate demo-current demo-history demo-inspect demo-snapshot demo-diagram demo-prompt demo-rag-index demo-rag-query
 
 install:
 	$(PDM) install -G test -G lint -G typecheck
@@ -123,7 +131,25 @@ db-logs-qdrant:
 	$(DOCKER_COMPOSE) --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --tail=100 qdrant
 
 langgraph-dev:
-	$(PDM) run langgraph dev
+	$(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS)
+
+langgraph-dev-demo:
+	$(DEMO_ENV) $(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS)
+
+langgraph-debug:
+	$(PDM) run langgraph dev $(LANGGRAPH_DEV_ARGS) --debug-port $(LANGGRAPH_DEBUG_PORT) --wait-for-client
+
+langgraph-up:
+	$(PDM) run langgraph up $(LANGGRAPH_UP_ARGS)
+
+langgraph-up-demo:
+	$(DEMO_ENV) $(PDM) run langgraph up $(LANGGRAPH_UP_ARGS)
+
+langgraph-build:
+	$(PDM) run langgraph build --config $(LANGGRAPH_CONFIG) --tag $(LANGGRAPH_IMAGE) --no-pull
+
+langgraph-test:
+	$(PDM) run pytest --no-cov tests/integration/test_langgraph_runtime.py tests/integration/test_langgraph_agent_checkpoint.py
 
 dashboard-demo:
 	$(PDM) run sqldbagent dashboard serve --datasource postgres_demo --schema public

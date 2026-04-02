@@ -71,6 +71,66 @@ def test_langgraph_system_prompt_uses_latest_snapshot_summary(tmp_path: Path) ->
         raise AssertionError(prompt)
 
 
+def test_langgraph_system_prompt_merges_saved_prompt_enhancement(
+    tmp_path: Path,
+) -> None:
+    """Merge saved prompt-enhancement context into the dynamic system prompt."""
+
+    database_path = tmp_path / "prompt-enhancement-runtime.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT UNIQUE, tier TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE invoices (id INTEGER PRIMARY KEY, customer_id INTEGER, amount_cents INTEGER)"
+            )
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        snapshot = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(snapshot)
+        enhancement = container.prompt_service.update_prompt_enhancement(
+            snapshot,
+            active=True,
+            user_context="Customers are tenants and invoices reflect subscription billing.",
+            business_rules="Treat amount_cents as the authoritative revenue field.",
+            answer_style="Prefer concise bullets with explicit evidence.",
+            refresh_generated=True,
+        )
+        container.prompt_service.save_prompt_enhancement(enhancement)
+    finally:
+        container.close()
+
+    prompt = create_sqldbagent_system_prompt(
+        datasource_name="sqlite",
+        settings=settings,
+        schema_name="main",
+    )
+
+    if "DATABASE-SPECIFIC PROMPT ENHANCEMENT:" not in prompt:
+        raise AssertionError(prompt)
+    if "subscription billing" not in prompt:
+        raise AssertionError(prompt)
+    if "authoritative revenue field" not in prompt:
+        raise AssertionError(prompt)
+
+
 def test_langgraph_agent_builder_returns_compiled_agent(tmp_path: Path) -> None:
     """Build and run a LangChain v1 agent over sqldbagent tools."""
 

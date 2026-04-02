@@ -355,13 +355,26 @@ def main() -> None:
                 "Start with a question about the selected datasource. "
                 "The agent will reuse stored snapshot context, retrieval, and safe SQL."
             )
+        selected_example_question: str | None = None
+        if session.example_questions:
+            st.subheader("Example Questions")
+            example_columns = st.columns(2)
+            for index, question in enumerate(session.example_questions):
+                with example_columns[index % len(example_columns)]:
+                    if st.button(
+                        question,
+                        key=f"example-question-{thread_id}-{index}",
+                        use_container_width=True,
+                    ):
+                        selected_example_question = question
 
         prompt = st.chat_input("Ask the database intelligence agent")
-        if prompt:
+        submitted_prompt = selected_example_question or prompt
+        if submitted_prompt:
             with st.spinner("Running agent turn..."):
                 session = service.run_turn(
                     thread_id=thread_id,
-                    user_message=prompt,
+                    user_message=submitted_prompt,
                     datasource_name=datasource_name,
                     schema_name=schema_name or None,
                 )
@@ -451,7 +464,7 @@ def main() -> None:
             st.caption(prompt_bundle.summary or "Stored prompt bundle")
             top_left, top_right = st.columns([2, 1])
             with top_left:
-                st.subheader("System Prompt")
+                st.subheader("Effective System Prompt")
                 st.code(prompt_bundle.system_prompt, language="text")
             with top_right:
                 st.subheader("Bundle Details")
@@ -479,12 +492,113 @@ def main() -> None:
                     mime="application/json",
                     use_container_width=True,
                 )
-            st.subheader("Prompt Sections")
-            for section in prompt_bundle.sections:
-                with st.expander(section.title, expanded=False):
-                    st.markdown(section.content)
-            st.subheader("State Seed")
-            st.json(prompt_bundle.state_seed, expanded=False)
+            prompt_views = st.tabs(
+                [
+                    "Effective Prompt",
+                    "Base Prompt",
+                    "Enhancement",
+                    "Sections",
+                    "State Seed",
+                ]
+            )
+            with prompt_views[0]:
+                st.code(prompt_bundle.system_prompt, language="text")
+            with prompt_views[1]:
+                st.code(prompt_bundle.base_system_prompt, language="text")
+            with prompt_views[2]:
+                enhancement = prompt_bundle.enhancement
+                if enhancement is None:
+                    st.info("No prompt enhancement is stored for this schema yet.")
+                else:
+                    st.caption(enhancement.summary or "Prompt enhancement")
+                    st.write(
+                        "Use this saved context to keep the dynamic prompt grounded in "
+                        "schema-specific guidance and your domain notes."
+                    )
+                    with st.form("prompt-enhancement-form"):
+                        enhancement_active = st.checkbox(
+                            "Use saved prompt enhancement",
+                            value=enhancement.active,
+                        )
+                        user_context = st.text_area(
+                            "User Context",
+                            value=enhancement.user_context or "",
+                            height=160,
+                            help=(
+                                "Domain notes, business terminology, stakeholder goals, "
+                                "or any extra context the agent should remember."
+                            ),
+                        )
+                        business_rules = st.text_area(
+                            "Business Rules And Caveats",
+                            value=enhancement.business_rules or "",
+                            height=160,
+                            help=(
+                                "Constraints, interpretation rules, data-quality caveats, "
+                                "or known exceptions for this schema."
+                            ),
+                        )
+                        answer_style = st.text_area(
+                            "Answer Style",
+                            value=enhancement.answer_style or "",
+                            height=120,
+                            help=(
+                                "Optional instructions for how answers should be shaped, "
+                                "summarized, or formatted."
+                            ),
+                        )
+                        action_left, action_right = st.columns(2)
+                        save_prompt_context = action_left.form_submit_button(
+                            "Save Prompt Context",
+                            use_container_width=True,
+                        )
+                        refresh_prompt_context = action_right.form_submit_button(
+                            "Save And Refresh DB Guidance",
+                            use_container_width=True,
+                        )
+                    if save_prompt_context or refresh_prompt_context:
+                        updated_bundle = service.update_prompt_bundle_enhancement(
+                            datasource_name=datasource_name,
+                            schema_name=schema_name or prompt_bundle.schema_name,
+                            active=enhancement_active,
+                            user_context=user_context,
+                            business_rules=business_rules,
+                            answer_style=answer_style,
+                            refresh_generated=refresh_prompt_context,
+                        )
+                        if updated_bundle is None:
+                            st.error(
+                                "No stored snapshot is available yet for this schema. "
+                                "Create a snapshot before saving prompt enhancements."
+                            )
+                        else:
+                            st.success("Saved prompt enhancement.")
+                            st.rerun()
+                    enhancement_tabs = st.tabs(
+                        ["Merged Guidance", "Generated DB Guidance", "Enhancement JSON"]
+                    )
+                    with enhancement_tabs[0]:
+                        st.code(prompt_bundle.system_prompt, language="text")
+                    with enhancement_tabs[1]:
+                        st.code(enhancement.generated_context, language="text")
+                    with enhancement_tabs[2]:
+                        st.json(enhancement.model_dump(mode="json"), expanded=False)
+                        st.download_button(
+                            label="Download Enhancement JSON",
+                            data=enhancement.model_dump_json(indent=2),
+                            file_name=(
+                                f"{prompt_bundle.datasource_name}"
+                                f"_{prompt_bundle.schema_name}.prompt-enhancement.json"
+                            ),
+                            mime="application/json",
+                            use_container_width=True,
+                        )
+            with prompt_views[3]:
+                for section in prompt_bundle.sections:
+                    with st.expander(section.title, expanded=False):
+                        st.markdown(section.content)
+            with prompt_views[4]:
+                st.json(prompt_bundle.state_seed, expanded=False)
 
     with threads_tab:
         threads = session.available_threads or available_threads
