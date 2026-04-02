@@ -21,13 +21,21 @@ Stable repo memory should capture:
 - snapshot storage is the durable multi-server introspection cache; persisted artifacts should be organized per datasource/schema and loadable later from an index
 - prompt bundles are durable agent artifacts and should be stored beside other per-datasource/schema artifacts with both JSON and Markdown forms
 - prompt enhancements are durable per-datasource/schema artifacts and should preserve user-authored context while regenerating DB-aware guidance from newer snapshots
+- prompt enhancements should support a distinct additional effective-prompt instruction field for direct system-prompt injection without overloading domain notes or answer-style guidance
 - retrieval is a helper over stored snapshot documents, not the primary execution path
 - Qdrant is the default retrieval backend for indexed snapshot documents and should be raised with the main integration compose stack
 - datasource aliases are a settings-layer ergonomics feature; persisted artifacts still use canonical datasource names
 - LangChain v1 should be used through our own strict tool surface and LangGraph checkpointers, not via the generic SQL toolkit as the primary execution path
 - local Postgres is the standard agent checkpoint target when persistence is enabled, but it should be treated as separate persistence infrastructure from inspected target databases
+- read-only engine policy is dialect-specific: SQLite uses `PRAGMA query_only`, Postgres sets `default_transaction_read_only`, and MSSQL should add ODBC `ApplicationIntent=ReadOnly` while still relying on the central SQL guard as the hard safety boundary
 - agent middleware should own dynamic prompting, state seeding, todo handling, tool-error shaping, HITL, and summarization policy
 - the dashboard Prompt tab is the current human-facing control surface for reviewing the base prompt, effective prompt, and saved prompt enhancement context
+- the dashboard chat surface should stream meaningful agent progress instead of blocking behind a single spinner, while keeping the same guarded read-only execution path
+- saved dashboard threads should support optional user-friendly names and remain reloadable through the shared thread registry
+- new datasource/schema contexts should offer a lightweight initial annotation path so prompt enhancement starts with human context instead of waiting for a later prompt-only workflow
+- the dashboard should expose explicit controls to regenerate schema-aware prompt context and to ensure or rebuild the retrieval index for the active stored snapshot
+- dashboard observability should report the effective checkpoint backend and fallback reason, not just the requested settings value
+- `make dashboard-demo` should prefer durable Postgres checkpointing when local checkpoint configuration is available
 - Make targets should cover the common LangGraph flows directly: dev, demo-dev, dockerized up, debug, and runtime/checkpoint test entrypoints
 - FastMCP serving should be settings-driven through `.env` with CLI overrides, not hard-coded transport choices
 - the first chat UI surface is the Streamlit dashboard over persisted LangGraph thread IDs, not a separate frontend app
