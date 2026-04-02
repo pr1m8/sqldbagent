@@ -108,6 +108,16 @@ def test_cli_postgres_end_to_end(
     if docs_export_result.exit_code != 0:
         raise AssertionError(docs_export_result.output)
 
+    diagram_result = runner.invoke(
+        app,
+        ["diagram", "schema", "postgres", live_postgres_schema],
+    )
+    if diagram_result.exit_code != 0:
+        raise AssertionError(diagram_result.output)
+    diagram_output = diagram_result.output.replace(" ", "").replace("\n", "")
+    if '"mermaid_erd":"erDiagram' not in diagram_output:
+        raise AssertionError(diagram_result.output)
+
     rag_index_result = runner.invoke(
         app,
         ["rag", "index", "postgres", live_postgres_schema, "--recreate-collection"],

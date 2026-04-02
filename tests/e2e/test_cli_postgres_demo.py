@@ -76,6 +76,15 @@ def test_cli_postgres_demo_end_to_end(
     if docs_result.exit_code != 0:
         raise AssertionError(docs_result.output)
 
+    diagram_result = runner.invoke(
+        app,
+        ["diagram", "schema", "postgres_demo", "public"],
+    )
+    if diagram_result.exit_code != 0:
+        raise AssertionError(diagram_result.output)
+    if '"mermaid_erd": "erDiagram' not in diagram_result.output.replace("\n", " "):
+        raise AssertionError(diagram_result.output)
+
     rag_index_result = runner.invoke(
         app,
         ["rag", "index", "postgres_demo", "public", "--recreate-collection"],
