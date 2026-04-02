@@ -575,10 +575,10 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
         @tool(parse_docstring=True)
         def remember_database_context_tool(
             notes: list[str],
+            runtime: tool_runtime,
             prompt_instructions: str | None = None,
             preferred_tables: list[str] | None = None,
             merge: bool = True,
-            runtime: tool_runtime | None = None,
         ) -> dict[str, Any]:
             """Persist datasource/schema notes for future agent runs.
 
@@ -615,9 +615,9 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
             @tool(parse_docstring=True)
             def sync_database_memory_tool(
                 schema_name: str,
+                runtime: tool_runtime,
                 create_snapshot_if_missing: bool = True,
                 sample_size: int = 5,
-                runtime: tool_runtime | None = None,
             ) -> dict[str, Any]:
                 """Refresh remembered context from the latest schema snapshot.
 
