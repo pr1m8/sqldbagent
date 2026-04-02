@@ -6,6 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from sqldbagent.adapters.langgraph.memory import (
+    load_database_memory,
+    remember_database_context,
+    sync_database_memory_from_snapshot,
+)
 from sqldbagent.adapters.shared import require_dependency
 from sqldbagent.core.bootstrap import ServiceContainer
 
@@ -208,7 +213,11 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
 
     tools_module = require_dependency("langchain_core.tools", "langchain")
     structured_tool = tools_module.StructuredTool
+    tool_module = require_dependency("langchain.tools", "langchain")
+    tool = tool_module.tool
     tools: list[Any] = []
+    settings = services.settings
+    datasource_name = services.datasource_name
 
     def list_databases() -> list[str]:
         return services.inspector.list_databases()
@@ -530,5 +539,125 @@ def create_langchain_tools(services: ServiceContainer) -> list[Any]:
                 ),
             ]
         )
+
+    if settings is not None and datasource_name is not None:
+
+        @tool(parse_docstring=True)
+        def load_database_memory_tool(runtime: Any) -> dict[str, Any]:
+            """Load the remembered datasource/schema context for the active agent.
+
+            Args:
+                runtime: LangChain tool runtime with access to the long-term store.
+
+            Returns:
+                dict[str, Any]: Stored memory payload for the active datasource/schema.
+            """
+
+            record = load_database_memory(
+                getattr(runtime, "store", None),
+                settings=settings,
+                datasource_name=datasource_name,
+                schema_name=(
+                    services.snapshotter.schema_name
+                    if hasattr(services.snapshotter, "schema_name")
+                    else None
+                ),
+            )
+            if record is None:
+                return {
+                    "datasource_name": datasource_name,
+                    "summary": "No remembered database context is stored yet.",
+                }
+            return record.model_dump(mode="json")
+
+        @tool(parse_docstring=True)
+        def remember_database_context_tool(
+            notes: list[str],
+            prompt_instructions: str | None = None,
+            preferred_tables: list[str] | None = None,
+            merge: bool = True,
+            runtime: Any = None,
+        ) -> dict[str, Any]:
+            """Persist datasource/schema notes for future agent runs.
+
+            Args:
+                notes: Notes worth remembering across threads and sessions.
+                prompt_instructions: Extra instructions to inject into the effective prompt.
+                preferred_tables: Optional list of frequently used tables.
+                merge: Whether to merge with existing remembered context.
+                runtime: LangChain tool runtime with access to the long-term store.
+
+            Returns:
+                dict[str, Any]: Persisted memory payload.
+            """
+
+            record = remember_database_context(
+                getattr(runtime, "store", None),
+                settings=settings,
+                datasource_name=datasource_name,
+                schema_name=None,
+                notes=notes,
+                prompt_instructions=prompt_instructions,
+                preferred_tables=preferred_tables,
+                merge=merge,
+            )
+            if record is None:
+                return {
+                    "datasource_name": datasource_name,
+                    "summary": "No long-term store is configured for this agent run.",
+                }
+            return record.model_dump(mode="json")
+
+        if services.snapshotter is not None:
+
+            @tool(parse_docstring=True)
+            def sync_database_memory_tool(
+                schema_name: str,
+                create_snapshot_if_missing: bool = True,
+                sample_size: int = 5,
+                runtime: Any = None,
+            ) -> dict[str, Any]:
+                """Refresh remembered context from the latest schema snapshot.
+
+                Args:
+                    schema_name: Schema scope whose snapshot should seed memory.
+                    create_snapshot_if_missing: Whether to create a snapshot when none exists yet.
+                    sample_size: Sample rows per profiled table when creating a snapshot.
+                    runtime: LangChain tool runtime with access to the long-term store.
+
+                Returns:
+                    dict[str, Any]: Persisted memory payload refreshed from snapshot context.
+                """
+
+                try:
+                    snapshot = services.snapshotter.load_latest_saved_snapshot(
+                        schema_name
+                    )
+                except FileNotFoundError:
+                    if not create_snapshot_if_missing:
+                        raise
+                    snapshot = services.snapshotter.create_schema_snapshot(
+                        schema_name=schema_name,
+                        sample_size=sample_size,
+                    )
+                    services.snapshotter.save_snapshot(snapshot)
+                record = sync_database_memory_from_snapshot(
+                    getattr(runtime, "store", None),
+                    settings=settings,
+                    datasource_name=datasource_name,
+                    schema_name=schema_name,
+                    snapshot=snapshot,
+                )
+                if record is None:
+                    return {
+                        "datasource_name": datasource_name,
+                        "schema_name": schema_name,
+                        "summary": "No long-term store is configured for this agent run.",
+                    }
+                return record.model_dump(mode="json")
+
+            tools.append(sync_database_memory_tool)
+
+        tools.extend([load_database_memory_tool, remember_database_context_tool])
 
     return tools
