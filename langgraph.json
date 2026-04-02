@@ -3,5 +3,8 @@
   "graphs": {
     "sqldbagent": "./src/sqldbagent/adapters/langgraph/runtime.py:agent"
   },
-  "env": "./.env"
+  "env": "./.env",
+  "store": {
+    "path": "./src/sqldbagent/adapters/langgraph/store.py:generate_store"
+  }
 }
