@@ -17,6 +17,7 @@ from sqldbagent.dashboard.app import (
     _build_mermaid_embed,
     _build_plotly_schema_figure,
     _format_thread_label,
+    _render_graphviz_image,
     _resolve_dashboard_checkpointer,
     _resolve_dashboard_store,
     _should_render_chat_message,
@@ -183,11 +184,13 @@ def test_build_mermaid_embed_contains_runtime_markup() -> None:
 
     payload = _build_mermaid_embed("flowchart LR\nA --> B")
 
-    if "cdn.jsdelivr.net/npm/mermaid@11" not in payload:
+    if "cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" not in payload:
         raise AssertionError(payload)
     if "svg-pan-zoom@3.6.2" not in payload:
         raise AssertionError(payload)
-    if "mermaid.render(" not in payload:
+    if "buildFallbackDiagramSource" not in payload:
+        raise AssertionError(payload)
+    if "mermaid.render(" not in payload and "renderDiagram(" not in payload:
         raise AssertionError(payload)
     if "Interactive Mermaid SVG" not in payload:
         raise AssertionError(payload)
@@ -196,6 +199,8 @@ def test_build_mermaid_embed_contains_runtime_markup() -> None:
     if "open-viewer" not in payload:
         raise AssertionError(payload)
     if "Open Focus View" not in payload:
+        raise AssertionError(payload)
+    if "Primary error:" not in payload:
         raise AssertionError(payload)
     if "flowchart LR" not in payload:
         raise AssertionError(payload)
@@ -236,6 +241,39 @@ def test_build_plotly_schema_figure_contains_node_trace() -> None:
 
     if len(getattr(figure, "data", [])) < 2:
         raise AssertionError(figure)
+
+
+def test_render_graphviz_image_returns_bytes_for_png() -> None:
+    """Render a PNG image from the schema graph when Graphviz is available."""
+
+    graph = SchemaGraphModel(
+        nodes=[
+            SchemaGraphNodeModel(
+                node_id="public.users",
+                label="public.users",
+                kind="table",
+                object_name="users",
+            ),
+            SchemaGraphNodeModel(
+                node_id="public.orders",
+                label="public.orders",
+                kind="table",
+                object_name="orders",
+            ),
+        ],
+        edges=[
+            SchemaGraphEdgeModel(
+                source_node_id="public.orders",
+                target_node_id="public.users",
+                label="user_id",
+            )
+        ],
+    )
+
+    image = _render_graphviz_image(graph, image_format="png")
+
+    if image is None or not image.startswith(b"\x89PNG"):
+        raise AssertionError(image)
 
 
 def test_format_thread_label_uses_preview_and_timestamp() -> None:

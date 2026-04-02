@@ -93,6 +93,51 @@ def test_dashboard_chat_service_persists_thread_with_reused_checkpointer(
         raise AssertionError(second.messages)
 
 
+def test_dashboard_chat_service_uses_saved_snapshot_when_state_lacks_snapshot_fields(
+    tmp_path: Path,
+) -> None:
+    """Surface the latest saved snapshot even when thread state omits snapshot ids."""
+
+    database_path = tmp_path / "dashboard-snapshot-fallback.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+        )
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    container = build_service_container("sqlite", settings=settings)
+    try:
+        snapshot = container.snapshotter.create_schema_snapshot("main", sample_size=1)
+        container.snapshotter.save_snapshot(snapshot)
+    finally:
+        container.close()
+
+    service = DashboardChatService(settings=settings)
+    session = service._session_from_values(  # noqa: SLF001
+        thread_id="thread-fallback-snapshot",
+        datasource_name="sqlite",
+        schema_name="main",
+        values={"messages": []},
+    )
+
+    if session.latest_snapshot_id != snapshot.snapshot_id:
+        raise AssertionError(session.model_dump())
+    if session.latest_snapshot_summary != snapshot.summary:
+        raise AssertionError(session.model_dump())
+
+
 def test_dashboard_chat_service_renders_tool_call_placeholder() -> None:
     """Render AI tool-call planning messages into readable assistant text."""
 
