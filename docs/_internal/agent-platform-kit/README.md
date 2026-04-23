@@ -28,14 +28,34 @@ Build one reusable agent platform layer with:
 
 ## Recommended Reading Order
 
-1. [01-overview.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/01-overview.md)
-2. [02-packages-and-interfaces.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/02-packages-and-interfaces.md)
-3. [03-runtime-middleware-and-tools.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/03-runtime-middleware-and-tools.md)
-4. [04-persistence-memory-and-retrieval.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/04-persistence-memory-and-retrieval.md)
-5. [05-deployment-and-observability.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/05-deployment-and-observability.md)
-6. [06-extraction-plan.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/06-extraction-plan.md)
-7. [07-pragmatic-recipes.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/07-pragmatic-recipes.md)
-8. [skill-bundle/agent-platform-foundations/SKILL.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md)
+1. [01-foundations-and-interfaces.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/01-foundations-and-interfaces.md)
+2. [02-runtime-middleware-and-state.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/02-runtime-middleware-and-state.md)
+3. [03-persistence-retrieval-and-memory.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/03-persistence-retrieval-and-memory.md)
+4. [04-operations-and-adoption.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/04-operations-and-adoption.md)
+5. [skill-bundle/agent-platform-foundations/SKILL.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md)
+
+## Why The Set Is Small
+
+The content used to be spread across many overlapping files. It is now grouped
+into four main docs:
+
+- foundations and interfaces
+- runtime, middleware, and state
+- persistence, retrieval, and memory
+- operations and adoption
+
+That is enough to keep the material readable without turning the folder into a
+maze.
+
+The four-doc split is also intentional for portability:
+
+- `01` answers "what are the reusable pieces and what agent shapes are sane?"
+- `02` answers "how do runtime, middleware, `ToolRuntime`, `RunnableConfig`,
+  and state fit together?"
+- `03` answers "how do persistence, retrieval, embeddings, cache layers, and
+  reset flows stay separate?"
+- `04` answers "how does this actually get integrated into a website, backend,
+  deployment, or multi-agent system?"
 
 ## Reference Sources
 

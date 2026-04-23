@@ -32,8 +32,7 @@ It exists to capture:
 - [mcp-servers.md](/Users/will/Projects/sqldbagent/docs/_internal/mcp-servers.md): recommended MCP server rollout and local config shape
 - [agents/README.md](/Users/will/Projects/sqldbagent/docs/_internal/agents/README.md): internal index for general agent-platform guidance and `sqldbagent`-specific agent notes
 - [agent-architecture.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-architecture.md): `sqldbagent`-specific LangChain v1 / LangGraph notes, agent boundaries, and checkpointing decisions
-- [agent-platform-kit/README.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/README.md): moveable blueprint for a reusable LangChain v1 / LangGraph / LangSmith agent platform
-- [agent-platform-kit/07-pragmatic-recipes.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/07-pragmatic-recipes.md): copy-pastable setup patterns for runtime, middleware, persistence, retrieval, and deployment
+- [agent-platform-kit/README.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/README.md): moveable blueprint for a reusable LangChain v1 / LangGraph / LangSmith agent platform, consolidated into a small set of high-signal docs
 - [agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md): self-contained moveable skill bundle for reusable agent-platform work
 - [dashboard/README.md](/Users/will/Projects/sqldbagent/docs/_internal/dashboard/README.md): internal home for the Streamlit dashboard surface
 - [dashboard/streamlit-dashboard.md](/Users/will/Projects/sqldbagent/docs/_internal/dashboard/streamlit-dashboard.md): dashboard behavior, boundaries, and debugging notes

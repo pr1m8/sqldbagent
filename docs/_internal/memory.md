@@ -29,7 +29,9 @@ Stable repo memory should capture:
 - when long-term memory is enabled, snapshot-derived context should be able to auto-sync into the store and reuse the checkpoint Postgres database URL unless a separate store URL is configured
 - live prompt exploration is a persisted read-only context layer that can be merged into prompt enhancements and optionally summarized into long-term memory; it is not a transient UI-only note
 - retrieval is a helper over stored snapshot documents, not the primary execution path
+- retrieval indexes should be treated as reproducible derivatives with explicit manifests, document fingerprints, and embedding caches
 - Qdrant is the default retrieval backend for indexed snapshot documents and should be raised with the main integration compose stack
+- retrieval operations should distinguish `ensure`, `rebuild`, and `reset` instead of using one ambiguous reindex path
 - dashboard retrieval should resolve the active stored snapshot from persisted prompt or diagram artifacts when thread state has not populated snapshot identifiers yet
 - datasource aliases are a settings-layer ergonomics feature; persisted artifacts still use canonical datasource names
 - LangChain v1 should be used through our own strict tool surface and LangGraph checkpointers, not via the generic SQL toolkit as the primary execution path

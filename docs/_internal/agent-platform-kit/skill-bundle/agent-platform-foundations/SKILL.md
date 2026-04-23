@@ -12,6 +12,7 @@ The design goal is:
 
 - `create_agent(...)` as the standard entry point
 - middleware as the policy layer
+- dynamic prompt assembly as the shared instruction path
 - runtime context for request-scoped injection
 - checkpointer for thread continuity
 - store for long-term memory
@@ -29,12 +30,10 @@ The design goal is:
 
 ## Read These References As Needed
 
-- For package choices and interface boundaries, read [references/packages.md](references/packages.md).
-- For `ToolRuntime`, decorators, middleware ordering, and tool schema rules, read [references/runtime-middleware-and-tools.md](references/runtime-middleware-and-tools.md).
-- For Postgres checkpointing, long-term memory, namespaces, and Qdrant retrieval, read [references/persistence-memory-and-retrieval.md](references/persistence-memory-and-retrieval.md).
-- For `langgraph.json`, LangSmith, `langgraph-sdk`, and deployment conventions, read [references/deployment-and-observability.md](references/deployment-and-observability.md).
-- For concrete install commands and copy-pastable setup patterns, read [references/pragmatic-recipes.md](references/pragmatic-recipes.md).
-- For extracting a domain app into a reusable platform package, read [references/extraction-plan.md](references/extraction-plan.md).
+- For package choices, abstractions, and profile boundaries, read [references/foundations-and-interfaces.md](references/foundations-and-interfaces.md).
+- For `ToolRuntime`, `RunnableConfig`, middleware, and state boundaries, read [references/runtime-middleware-and-state.md](references/runtime-middleware-and-state.md).
+- For Postgres checkpointing, long-term memory, Qdrant retrieval, embeddings, caching, and `ensure` versus `rebuild` versus `reset`, read [references/persistence-retrieval-and-memory.md](references/persistence-retrieval-and-memory.md).
+- For install patterns, `langgraph.json`, website and backend integration, LangSmith, SDK usage, and extraction planning, read [references/operations-and-adoption.md](references/operations-and-adoption.md).
 
 ## Non-Negotiable Rules
 
@@ -44,6 +43,8 @@ The design goal is:
   artifacts already exist.
 - Do not hardcode provider or model choice inside skill sets.
 - Do not let UI code own prompt assembly or persistence policy.
+- Do not split into multi-agent topology unless there is a real system
+  boundary.
 
 ## Practical Defaults
 

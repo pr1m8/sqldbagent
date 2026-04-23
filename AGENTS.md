@@ -46,6 +46,7 @@ If implementation pressure conflicts with the roadmap, fix the roadmap deliberat
 - Treat dashboard observability as runtime truth: report the effective checkpoint backend and any fallback reason, not just the requested configuration value.
 - Treat LangChain v1 middleware as the agent policy layer. Prompting, state seeding, tool handling, HITL, and summarization should live there instead of being scattered across callers.
 - Treat retrieval as an additive helper over stored snapshot documents, not a replacement for inspection, profiling, snapshots, or guarded SQL.
+- Treat retrieval indexes as reproducible derivatives of durable artifacts; keep embedding caches and retrieval manifests explicit so `ensure`, `rebuild`, and `reset` flows stay distinct and reviewable.
 - Treat the LangGraph checkpoint Postgres as persistence infrastructure. Local demos may reuse the same Postgres service, but real deployments should generally separate checkpoint storage from inspected application databases.
 - Prefer canonical datasource names in persisted artifacts and use settings-layer aliases only for CLI and agent ergonomics.
 
@@ -127,6 +128,7 @@ Treat the following as stable repo memory:
 - keep database safety constraints central
 - keep dialect-specific read-only enforcement honest: prefer connection/session policy when the backend supports it, and fall back to the central guard plus driver-level read intent where that is the strongest reliable option
 - keep retrieval grounded in stored snapshot documents and stable metadata filters
+- keep embedding caches keyed by normalized document fingerprints plus embedding model identity, and keep retrieval manifests durable enough to explain what is currently indexed
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
 - keep prompt enhancements persisted, reviewable, and merged through the shared dynamic-prompt path rather than ad hoc UI logic
 - keep cached prompt token budgets durable and visible across CLI, dashboard, and agent surfaces; prefer `tiktoken` when available and deterministic fallback otherwise
@@ -136,6 +138,7 @@ Treat the following as stable repo memory:
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
 - keep generalized LangChain v1 / LangGraph platform guidance in the moveable internal blueprint and skill bundle under `docs/_internal/agent-platform-kit/`, so it can be lifted into other repos without rewriting the same patterns
 - keep repo-specific dashboard notes under `docs/_internal/dashboard/` instead of mixing them into the general agent-platform material
+- keep generalized retrieval, embeddings, cache, and reset guidance in the moveable blueprint and skill bundle under `docs/_internal/agent-platform-kit/`
 
 Record durable memory in `AGENTS.md`, the roadmap, or `docs/_internal/`. Do not treat transient terminal state as project memory.
 
