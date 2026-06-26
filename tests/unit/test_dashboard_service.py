@@ -22,6 +22,7 @@ from sqldbagent.core.config import (
 from sqldbagent.core.enums import Dialect
 from sqldbagent.dashboard.models import ChatMessageModel
 from sqldbagent.dashboard.service import DashboardChatService
+from sqldbagent.observability.service import ObservabilityService
 from sqldbagent.prompts.models import PromptBundleModel
 from tests.helpers import ToolReadyFakeMessagesListChatModel
 
@@ -270,6 +271,52 @@ def test_dashboard_chat_service_surfaces_observability_settings() -> None:
         observability.get("database_access_summary")
     ):
         raise AssertionError(observability)
+
+
+def test_dashboard_chat_service_records_guarded_query_audit(
+    tmp_path: Path,
+) -> None:
+    """Record guarded query audit events without changing query execution."""
+
+    database_path = tmp_path / "dashboard-query-audit.db"
+    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+        )
+        connection.execute(text("INSERT INTO users (email) VALUES ('a@example.com')"))
+    engine.dispose()
+
+    settings = AppSettings(
+        datasources=[
+            DatasourceSettings(
+                name="sqlite",
+                dialect=Dialect.SQLITE,
+                url=f"sqlite+pysqlite:///{database_path}",
+            )
+        ],
+        artifacts=ArtifactSettings(root_dir=str(tmp_path)),
+        default_schema_name="main",
+    )
+    service = DashboardChatService(settings=settings)
+
+    result = service.run_safe_query(
+        datasource_name="sqlite",
+        sql="select id, email from users",
+        max_rows=5,
+    )
+
+    if result.row_count != 1:
+        raise AssertionError(result.model_dump())
+    events = ObservabilityService(settings=settings).read_recent_audit_events(
+        datasource_name="sqlite"
+    )
+    if not events or events[0].event_type != "query.execute":
+        raise AssertionError(events)
+    if events[0].read_only is not True:
+        raise AssertionError(events[0])
+    if events[0].touched.get("row_count") != 1:
+        raise AssertionError(events[0])
 
 
 def test_dashboard_chat_service_surfaces_checkpoint_fallback_status() -> None:

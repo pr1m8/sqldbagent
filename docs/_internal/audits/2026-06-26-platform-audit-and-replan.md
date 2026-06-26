@@ -393,7 +393,7 @@ Before merging each slice:
 
 ## First Concrete Slice
 
-The best next implementation slice is:
+Implemented first:
 
 - create `src/sqldbagent/observability/`
 - add usage/audit Pydantic models
@@ -404,6 +404,14 @@ The best next implementation slice is:
 
 This gives us immediate cost and audit visibility without changing database
 execution behavior.
+
+Follow-on work:
+
+- add provider pricing to the LLM registry so cost estimates become real values
+- add LangChain middleware-level model/tool usage capture for non-dashboard
+  agent entrypoints
+- expand audit events around prompt exploration, retrieval indexing, profiling,
+  and snapshot creation
 
 ## References
 

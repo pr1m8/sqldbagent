@@ -19,6 +19,8 @@ The dashboard is where operators can:
 - ensure or rebuild retrieval for the active snapshot
 - inspect schema diagrams and fallback images
 - run guarded read-only SQL through the shared query layer
+- inspect local usage and audit artifacts for recent agent turns and guarded
+  queries
 
 ## Important Rules
 
@@ -44,6 +46,36 @@ The dashboard is where operators can:
   Mermaid rendering is flaky
 - retrieval controls should resolve the active snapshot from persisted artifacts
   when the thread state is sparse
+- usage and audit views should read from append-only local artifacts so they
+  still work when LangSmith is disabled or unavailable
+
+## Usage And Audit Tab
+
+The dashboard exposes local observability in a `Usage` tab backed by
+`sqldbagent.observability`.
+
+Current artifact layout:
+
+- `var/sqldbagent/audit/events/YYYY-MM-DD.jsonl` for audit events
+- `var/sqldbagent/audit/usage/YYYY-MM-DD.jsonl` for model and tool usage events
+
+Current coverage:
+
+- dashboard agent turns record `agent.run_turn` audit events
+- dashboard guarded queries record `query.execute` audit events
+- LangChain message `usage_metadata` is extracted into model usage events when
+  providers expose token counts
+- tool messages are recorded with tool name, status, and output size
+- the UI shows summary cards, usage/audit tables, and a small Plotly event-kind
+  chart
+
+Important limitations:
+
+- cost fields are present but pricing is currently marked `not_configured`
+- custom model pricing belongs in the later LLM registry slice
+- artifact recording is best-effort and must never change SQL execution
+  semantics
+- local artifacts complement LangSmith; they do not replace trace debugging
 
 ## Persistence Expectations
 
@@ -74,6 +106,8 @@ pdm run pytest tests/unit tests/e2e tests/integration -q
   leave the dashboard unusable
 - retrieval status should come from persisted artifacts or manifests, not only
   the live thread state
+- usage tab rows come from local JSONL artifacts; if they are missing, run an
+  agent turn or guarded query first
 
 ## Boundary With General Agent Docs
 

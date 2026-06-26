@@ -15,6 +15,7 @@ from sqldbagent.docs.service import SnapshotDocumentService
 from sqldbagent.engines.factory import DatasourceRegistry, EngineManager
 from sqldbagent.introspect.base import InspectionService
 from sqldbagent.introspect.service import SQLAlchemyInspectionService
+from sqldbagent.observability.service import ObservabilityService
 from sqldbagent.profile.service import SQLAlchemyProfilingService
 from sqldbagent.prompts.service import SnapshotPromptService
 from sqldbagent.retrieval.service import SnapshotRetrievalService
@@ -37,6 +38,7 @@ class ServiceContainer:
         document_service: Shared snapshot document-export service.
         prompt_service: Shared prompt-export service.
         retrieval_service: Shared retrieval service over stored snapshot documents.
+        observability_service: Shared local observability artifact service.
         datasource_name: Canonical datasource name backing the container.
     settings: Application settings that built the container.
         engine: Optional SQLAlchemy engine owned by the container.
@@ -54,6 +56,7 @@ class ServiceContainer:
     document_service: SnapshotDocumentService | None = None
     prompt_service: SnapshotPromptService | None = None
     retrieval_service: SnapshotRetrievalService | None = None
+    observability_service: ObservabilityService | None = None
     datasource_name: str | None = None
     settings: AppSettings | None = None
     engine: Engine | None = None
@@ -155,6 +158,7 @@ def build_service_container(
         artifacts=resolved_settings.artifacts,
         settings=resolved_settings,
     )
+    observability_service = ObservabilityService(settings=resolved_settings)
     try:
         require_dependency("langchain_qdrant", "langchain-qdrant")
         require_dependency("qdrant_client", "qdrant-client")
@@ -182,6 +186,7 @@ def build_service_container(
         document_service=document_service,
         prompt_service=prompt_service,
         retrieval_service=retrieval_service,
+        observability_service=observability_service,
         datasource_name=canonical_datasource_name,
         settings=resolved_settings,
         engine=engine,

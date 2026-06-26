@@ -11,6 +11,7 @@ from sqldbagent.core.config import (
     AppSettings,
 )
 from sqldbagent.dashboard.app import (
+    _audit_event_rows,
     _build_checkpoint_status,
     _build_database_access_status,
     _build_graphviz_dot,
@@ -23,6 +24,7 @@ from sqldbagent.dashboard.app import (
     _should_render_chat_message,
     _should_show_example_questions,
     _summarize_tool_message,
+    _usage_event_rows,
 )
 from sqldbagent.dashboard.models import ChatMessageModel, DashboardThreadEntryModel
 from sqldbagent.diagrams.models import (
@@ -177,6 +179,52 @@ def test_build_database_access_status_prefers_summary_field() -> None:
 
     if "Postgres read-only transactions" not in status:
         raise AssertionError(status)
+
+
+def test_usage_and_audit_event_rows_shape_dashboard_tables() -> None:
+    """Shape local observability payloads into dashboard table rows."""
+
+    observability = {
+        "local_usage_events": [
+            {
+                "created_at": "2026-06-26T00:00:00Z",
+                "model": "gpt-test",
+                "provider": "openai",
+                "total_tokens": 42,
+                "surface": "dashboard",
+                "run_id": "run-1",
+            },
+            {
+                "created_at": "2026-06-26T00:00:01Z",
+                "tool_name": "safe_query_sql",
+                "status": "success",
+                "surface": "dashboard",
+                "run_id": "run-1",
+            },
+        ],
+        "local_audit_events": [
+            {
+                "completed_at": "2026-06-26T00:00:02Z",
+                "event_type": "query.execute",
+                "status": "success",
+                "duration_ms": 12.3,
+                "access_mode": "read_only",
+                "read_only": True,
+                "touched": {"row_count": 1},
+                "run_id": "run-2",
+            }
+        ],
+    }
+
+    usage_rows = _usage_event_rows(observability)
+    audit_rows = _audit_event_rows(observability)
+
+    if usage_rows[0]["kind"] != "model":
+        raise AssertionError(usage_rows)
+    if usage_rows[1]["kind"] != "tool":
+        raise AssertionError(usage_rows)
+    if audit_rows[0]["event_type"] != "query.execute":
+        raise AssertionError(audit_rows)
 
 
 def test_build_mermaid_embed_contains_runtime_markup() -> None:

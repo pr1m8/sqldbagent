@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -39,6 +40,8 @@ from sqldbagent.dashboard.models import (
     DashboardTurnProgressModel,
 )
 from sqldbagent.diagrams.models import DiagramBundleModel
+from sqldbagent.observability.models import AuditEventModel
+from sqldbagent.observability.service import ObservabilityService
 from sqldbagent.prompts.exploration import PromptExplorationService
 from sqldbagent.prompts.models import PromptBundleModel
 from sqldbagent.retrieval.models import RetrievalIndexManifestModel
@@ -73,6 +76,7 @@ class DashboardChatService:
         self._model = model
         self._checkpointer = checkpointer
         self._store = store
+        self._observability = ObservabilityService(settings=self._settings)
 
     @staticmethod
     def new_thread_id() -> str:
@@ -105,6 +109,9 @@ class DashboardChatService:
 
         resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
         config = {"configurable": {"thread_id": thread_id}}
+        run_id = uuid4().hex
+        started_at = datetime.now(UTC)
+        started_perf = perf_counter()
         self._emit_progress(
             progress_callback,
             phase="bootstrap",
@@ -122,6 +129,12 @@ class DashboardChatService:
             datasource_name=resolved_datasource,
             schema_name=schema_name,
         ) as agent:
+            try:
+                existing_state = agent.get_state(config)
+                existing_values = getattr(existing_state, "values", {}) or {}
+                existing_message_count = len(existing_values.get("messages", []) or [])
+            except Exception:  # noqa: BLE001
+                existing_message_count = 0
             with langsmith_tracing_context(
                 settings=self._settings,
                 tags=["dashboard", resolved_datasource],
@@ -142,6 +155,29 @@ class DashboardChatService:
                         for event in self._progress_events_from_update(update):
                             self._emit_progress(progress_callback, event=event)
                 except Exception as exc:
+                    self._record_audit_event(
+                        AuditEventModel(
+                            event_type="agent.run_turn",
+                            run_id=run_id,
+                            thread_id=thread_id,
+                            surface="dashboard",
+                            datasource_name=resolved_datasource,
+                            schema_name=schema_name,
+                            dialect=self._resolve_dialect_value(resolved_datasource),
+                            access_mode="read_only",
+                            read_only=True,
+                            status="error",
+                            started_at=started_at,
+                            completed_at=datetime.now(UTC),
+                            duration_ms=round(
+                                (perf_counter() - started_perf) * 1000, 3
+                            ),
+                            error=str(exc),
+                            metadata={
+                                "message_characters": len(user_message),
+                            },
+                        )
+                    )
                     self._emit_progress(
                         progress_callback,
                         phase="error",
@@ -151,6 +187,48 @@ class DashboardChatService:
                     raise
                 state = agent.get_state(config)
                 result = getattr(state, "values", {}) or {}
+                new_messages = list(result.get("messages", []) or [])[
+                    existing_message_count:
+                ]
+                self._record_agent_usage(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    datasource_name=resolved_datasource,
+                    schema_name=schema_name,
+                    messages=new_messages,
+                )
+                self._record_audit_event(
+                    AuditEventModel(
+                        event_type="agent.run_turn",
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        surface="dashboard",
+                        datasource_name=resolved_datasource,
+                        schema_name=schema_name,
+                        dialect=self._resolve_dialect_value(resolved_datasource),
+                        access_mode="read_only",
+                        read_only=True,
+                        status="success",
+                        started_at=started_at,
+                        completed_at=datetime.now(UTC),
+                        duration_ms=round((perf_counter() - started_perf) * 1000, 3),
+                        input_limits={
+                            "max_model_calls": self._settings.agent.max_model_calls_per_run,
+                            "max_tool_calls": self._settings.agent.max_tool_calls_per_run,
+                        },
+                        touched={
+                            "new_messages": len(new_messages),
+                            "tool_messages": sum(
+                                1
+                                for message in new_messages
+                                if getattr(message, "type", None) == "tool"
+                            ),
+                        },
+                        metadata={
+                            "message_characters": len(user_message),
+                        },
+                    )
+                )
             session = self._session_from_values(
                 thread_id=thread_id,
                 datasource_name=resolved_datasource,
@@ -340,27 +418,66 @@ class DashboardChatService:
         """
 
         resolved_datasource = self._settings.resolve_datasource_name(datasource_name)
+        run_id = uuid4().hex
+        started_at = datetime.now(UTC)
+        started_perf = perf_counter()
+        result: QueryExecutionResult | None = None
+        query_error: str | None = None
         if mode == "async":
-            return asyncio.run(
-                self._run_safe_query_async(
+            try:
+                result = asyncio.run(
+                    self._run_safe_query_async(
+                        datasource_name=resolved_datasource,
+                        sql=sql,
+                        max_rows=max_rows,
+                        access_mode=access_mode,
+                    )
+                )
+                return result
+            except Exception as exc:
+                query_error = str(exc)
+                raise
+            finally:
+                self._record_query_audit(
+                    run_id=run_id,
                     datasource_name=resolved_datasource,
+                    started_at=started_at,
+                    started_perf=started_perf,
                     sql=sql,
                     max_rows=max_rows,
+                    mode=mode,
                     access_mode=access_mode,
+                    result=result,
+                    error=query_error,
                 )
-            )
 
         container = build_service_container(
             resolved_datasource,
             settings=self._settings,
         )
         try:
-            return container.query_service.run(
+            result = container.query_service.run(
                 sql,
                 max_rows=max_rows,
                 access_mode=access_mode,
             )
+            return result
+        except Exception as exc:
+            query_error = str(exc)
+            raise
         finally:
+            self._record_query_audit(
+                run_id=run_id,
+                datasource_name=resolved_datasource,
+                started_at=started_at,
+                started_perf=started_perf,
+                sql=sql,
+                max_rows=max_rows,
+                mode=mode,
+                access_mode=access_mode,
+                result=result,
+                error=query_error,
+            )
             container.close()
 
     async def _run_safe_query_async(
@@ -766,6 +883,7 @@ class DashboardChatService:
         return {
             **checkpoint_payload,
             **memory_payload,
+            **self._build_local_observability_payload(datasource_name=datasource_name),
             "database_access_mode": "guarded_read_only",
             "database_access_summary": self._build_database_access_summary(
                 datasource_name=datasource_name
@@ -775,6 +893,33 @@ class DashboardChatService:
             "langsmith_endpoint": langsmith_settings.endpoint,
             "langsmith_workspace_id": langsmith_settings.workspace_id,
             "langsmith_tags": list(langsmith_settings.tags),
+        }
+
+    def _build_local_observability_payload(
+        self,
+        *,
+        datasource_name: str,
+    ) -> dict[str, object]:
+        """Build local usage/audit details for the dashboard."""
+
+        usage_events = self._observability.read_recent_usage_events(
+            limit=100,
+            datasource_name=datasource_name,
+        )
+        audit_events = self._observability.read_recent_audit_events(
+            limit=100,
+            datasource_name=datasource_name,
+        )
+        usage_summary = self._observability.summarize_usage(usage_events)
+        return {
+            "local_observability_enabled": True,
+            "local_usage_summary": usage_summary.model_dump(mode="json"),
+            "local_usage_events": [
+                event.model_dump(mode="json") for event in usage_events[:25]
+            ],
+            "local_audit_events": [
+                event.model_dump(mode="json") for event in audit_events[:25]
+            ],
         }
 
     def _build_checkpoint_observability(self) -> dict[str, object]:
@@ -969,6 +1114,102 @@ class DashboardChatService:
         return (
             "All dashboard SQL stays on the central guarded read-only execution path."
         )
+
+    def _record_agent_usage(
+        self,
+        *,
+        run_id: str,
+        thread_id: str,
+        datasource_name: str,
+        schema_name: str | None,
+        messages: list[Any],
+    ) -> None:
+        """Record local model and tool usage for one dashboard agent run."""
+
+        model_events = self._observability.extract_model_usage_events(
+            messages,
+            run_id=run_id,
+            surface="dashboard",
+            thread_id=thread_id,
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+        )
+        tool_events = self._observability.extract_tool_usage_events(
+            messages,
+            run_id=run_id,
+            surface="dashboard",
+            thread_id=thread_id,
+            datasource_name=datasource_name,
+            schema_name=schema_name,
+        )
+        self._observability.append_model_usage_events(model_events)
+        self._observability.append_tool_usage_events(tool_events)
+
+    def _record_query_audit(
+        self,
+        *,
+        run_id: str,
+        datasource_name: str,
+        started_at: datetime,
+        started_perf: float,
+        sql: str,
+        max_rows: int | None,
+        mode: str,
+        access_mode: str,
+        result: QueryExecutionResult | None,
+        error: str | None = None,
+    ) -> None:
+        """Record a local audit event for a guarded dashboard query."""
+
+        status = "error" if result is None else "success"
+        error_text = error if result is None else None
+        guard_payload: dict[str, object] = {}
+        if result is not None:
+            guard_payload = result.guard.model_dump(mode="json")
+            if not result.guard.allowed:
+                status = "warning"
+            error_text = None
+        self._record_audit_event(
+            AuditEventModel(
+                event_type="query.execute",
+                run_id=run_id,
+                surface="dashboard",
+                datasource_name=datasource_name,
+                dialect=self._resolve_dialect_value(datasource_name),
+                access_mode=access_mode,
+                read_only=access_mode != "writable",
+                status=status,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                duration_ms=round((perf_counter() - started_perf) * 1000, 3),
+                input_limits={"max_rows": max_rows},
+                touched={
+                    "mode": mode,
+                    "sql_characters": len(sql),
+                    "allowed": None if result is None else result.guard.allowed,
+                    "row_count": None if result is None else result.row_count,
+                    "truncated": None if result is None else result.truncated,
+                },
+                error=error_text,
+                metadata={"guard": guard_payload},
+            )
+        )
+
+    def _record_audit_event(self, event: AuditEventModel) -> None:
+        """Best-effort audit recording that never controls runtime behavior."""
+
+        try:
+            self._observability.append_audit_event(event)
+        except Exception:  # noqa: BLE001
+            return
+
+    def _resolve_dialect_value(self, datasource_name: str) -> str | None:
+        """Return the configured dialect value for one datasource."""
+
+        try:
+            return self._settings.get_datasource(datasource_name).dialect.value
+        except Exception:  # noqa: BLE001
+            return None
 
     @contextmanager
     def _resolved_store(self) -> Iterator[Any | None]:

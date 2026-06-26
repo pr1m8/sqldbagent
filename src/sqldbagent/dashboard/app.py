@@ -110,6 +110,51 @@ def _build_database_access_status(observability: dict[str, object]) -> str:
     return "All dashboard SQL stays on the central guarded read-only execution path."
 
 
+def _usage_event_rows(observability: dict[str, object]) -> list[dict[str, object]]:
+    """Build table rows for local usage events."""
+
+    rows: list[dict[str, object]] = []
+    for event in observability.get("local_usage_events", []) or []:
+        if not isinstance(event, dict):
+            continue
+        rows.append(
+            {
+                "created_at": str(event.get("created_at") or ""),
+                "kind": "tool" if event.get("tool_name") else "model",
+                "name": str(event.get("tool_name") or event.get("model") or ""),
+                "provider": str(event.get("provider") or ""),
+                "tokens": event.get("total_tokens") or "",
+                "status": event.get("status") or "",
+                "surface": event.get("surface") or "",
+                "run_id": event.get("run_id") or "",
+            }
+        )
+    return rows
+
+
+def _audit_event_rows(observability: dict[str, object]) -> list[dict[str, object]]:
+    """Build table rows for local audit events."""
+
+    rows: list[dict[str, object]] = []
+    for event in observability.get("local_audit_events", []) or []:
+        if not isinstance(event, dict):
+            continue
+        touched = event.get("touched")
+        rows.append(
+            {
+                "completed_at": str(event.get("completed_at") or ""),
+                "event_type": str(event.get("event_type") or ""),
+                "status": str(event.get("status") or ""),
+                "duration_ms": event.get("duration_ms") or "",
+                "access_mode": str(event.get("access_mode") or ""),
+                "read_only": event.get("read_only"),
+                "touched": json_dumps(touched) if isinstance(touched, dict) else "",
+                "run_id": event.get("run_id") or "",
+            }
+        )
+    return rows
+
+
 def _build_mermaid_embed(mermaid_text: str) -> str:
     """Build embeddable Mermaid HTML for Streamlit components.
 
@@ -1320,9 +1365,15 @@ def main() -> None:
                     value=str(card.get("value", "")),
                 )
 
-    chat_tab, schema_tab, prompt_tab, retrieval_tab, query_tab, threads_tab = st.tabs(
-        ["Chat", "Schema", "Prompt", "Retrieval", "Query", "Threads"]
-    )
+    (
+        chat_tab,
+        schema_tab,
+        prompt_tab,
+        retrieval_tab,
+        query_tab,
+        usage_tab,
+        threads_tab,
+    ) = st.tabs(["Chat", "Schema", "Prompt", "Retrieval", "Query", "Usage", "Threads"])
 
     with chat_tab:
         show_tool_traces = bool(
@@ -2149,6 +2200,79 @@ def main() -> None:
                 st=st,
                 result_payload=st.session_state.dashboard_query_result,
             )
+
+    with usage_tab:
+        usage_summary = observability.get("local_usage_summary")
+        usage_events = _usage_event_rows(observability)
+        audit_events = _audit_event_rows(observability)
+        st.caption(
+            "Local append-only usage and audit artifacts. These are separate from "
+            "LangSmith so the dashboard remains useful offline."
+        )
+        if isinstance(usage_summary, dict):
+            usage_cols = st.columns(4)
+            usage_cols[0].metric(
+                "Usage Events",
+                str(usage_summary.get("event_count", 0)),
+            )
+            usage_cols[1].metric(
+                "Model Calls",
+                str(usage_summary.get("model_event_count", 0)),
+            )
+            usage_cols[2].metric(
+                "Tool Calls",
+                str(usage_summary.get("tool_event_count", 0)),
+            )
+            usage_cols[3].metric(
+                "Tokens",
+                str(usage_summary.get("total_tokens", 0)),
+            )
+        usage_table_tab, audit_table_tab, usage_chart_tab = st.tabs(
+            ["Usage Events", "Audit Events", "Charts"]
+        )
+        with usage_table_tab:
+            if usage_events:
+                st.dataframe(usage_events, use_container_width=True, hide_index=True)
+            else:
+                st.info(
+                    "No local usage events are available yet. Run an agent turn or "
+                    "a guarded query to populate this view."
+                )
+        with audit_table_tab:
+            if audit_events:
+                st.dataframe(audit_events, use_container_width=True, hide_index=True)
+            else:
+                st.info("No local audit events are available yet.")
+        with usage_chart_tab:
+            if not usage_events:
+                st.info("No usage events are available to chart yet.")
+            else:
+                graph_objects = require_dependency("plotly.graph_objects", "plotly")
+                counts: dict[str, int] = {}
+                for row in usage_events:
+                    key = str(row.get("kind") or "unknown")
+                    counts[key] = counts.get(key, 0) + 1
+                figure = graph_objects.Figure(
+                    data=[
+                        graph_objects.Bar(
+                            x=list(counts.keys()),
+                            y=list(counts.values()),
+                            marker_color=["#1f6f64", "#8fc7b6", "#d6a84f"],
+                        )
+                    ]
+                )
+                figure.update_layout(
+                    title="Local Usage Event Counts",
+                    xaxis_title="Event kind",
+                    yaxis_title="Count",
+                    height=360,
+                    margin={"l": 20, "r": 20, "t": 60, "b": 40},
+                )
+                st.plotly_chart(
+                    figure,
+                    use_container_width=True,
+                    config={"displaylogo": False},
+                )
 
     with threads_tab:
         threads = session.available_threads or available_threads
