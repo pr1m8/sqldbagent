@@ -78,6 +78,7 @@ Use it for:
 - moveable internal skill bundles that are intended to be copied into other repos or local skill directories
 - agent-platform notes under `docs/_internal/agents/` and `docs/_internal/agent-platform-kit/`
 - dashboard-surface notes under `docs/_internal/dashboard/`
+- platform audits and replans under `docs/_internal/audits/`
 
 Do not use it for:
 
@@ -132,10 +133,16 @@ Treat the following as stable repo memory:
 - keep prompt exports grounded in stored snapshots and reusable state seed helpers
 - keep prompt enhancements persisted, reviewable, and merged through the shared dynamic-prompt path rather than ad hoc UI logic
 - keep cached prompt token budgets durable and visible across CLI, dashboard, and agent surfaces; prefer `tiktoken` when available and deterministic fallback otherwise
+- keep cost monitoring as a local durable usage ledger in addition to LangSmith tracing; model/tool usage, pricing metadata, budget summaries, and dashboard views should not depend on an external trace service being available
+- keep custom LLM support behind a registry with provider, model, feature flags, context window, pricing, reasoning mapping, and LangSmith metadata instead of adding one-off branches to the runtime model helper
+- keep custom notes as typed, scoped, provenance-aware records with explicit prompt-injection policy instead of flat freeform strings
+- keep audit events append-only and descriptive; query/profile/prompt/retrieval/model/tool/memory audit capture must not create new execution paths or weaken read-only defaults
 - keep LangGraph long-term memory grounded in canonical datasource/schema context and stored snapshot summaries, with Postgres-backed store memory preferred when durability matters
 - keep dashboard thread names, onboarding annotations, and streamed progress grounded in shared services and persisted artifacts rather than transient UI-only state
 - keep dashboard retrieval and schema views resilient: resolve the active snapshot from persisted artifacts when state is sparse, and keep a server-rendered image fallback available when Mermaid rendering is unreliable
 - keep LangSmith tracing optional, `.env`-driven, and free of committed secrets
+- keep MSSQL hardening in a real dialect package for SQL Server catalog enrichment, storage/index metadata, permission audit, and profiling safeguards
+- keep dashboard analytics Plotly/native-Streamlit first; only add `streamlit-aggrid` when richer grid behavior is worth the dependency surface
 - keep generalized LangChain v1 / LangGraph platform guidance in the moveable internal blueprint and skill bundle under `docs/_internal/agent-platform-kit/`, so it can be lifted into other repos without rewriting the same patterns
 - keep repo-specific dashboard notes under `docs/_internal/dashboard/` instead of mixing them into the general agent-platform material
 - keep generalized retrieval, embeddings, cache, and reset guidance in the moveable blueprint and skill bundle under `docs/_internal/agent-platform-kit/`

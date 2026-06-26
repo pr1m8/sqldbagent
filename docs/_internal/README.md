@@ -34,6 +34,7 @@ It exists to capture:
 - [agent-architecture.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-architecture.md): `sqldbagent`-specific LangChain v1 / LangGraph notes, agent boundaries, and checkpointing decisions
 - [agent-platform-kit/README.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/README.md): moveable blueprint for a reusable LangChain v1 / LangGraph / LangSmith agent platform, consolidated into a small set of high-signal docs
 - [agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md](/Users/will/Projects/sqldbagent/docs/_internal/agent-platform-kit/skill-bundle/agent-platform-foundations/SKILL.md): self-contained moveable skill bundle for reusable agent-platform work
+- [audits/2026-06-26-platform-audit-and-replan.md](/Users/will/Projects/sqldbagent/docs/_internal/audits/2026-06-26-platform-audit-and-replan.md): current audit and replan for cost monitoring, custom LLMs, notes, audit trails, MSSQL hardening, and dashboard charts
 - [dashboard/README.md](/Users/will/Projects/sqldbagent/docs/_internal/dashboard/README.md): internal home for the Streamlit dashboard surface
 - [dashboard/streamlit-dashboard.md](/Users/will/Projects/sqldbagent/docs/_internal/dashboard/streamlit-dashboard.md): dashboard behavior, boundaries, and debugging notes
 - [handoff/README.md](/Users/will/Projects/sqldbagent/docs/_internal/handoff/README.md): repo-local handoff process for moving work between chats and agents

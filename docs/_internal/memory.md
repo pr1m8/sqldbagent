@@ -24,6 +24,10 @@ Stable repo memory should capture:
 - prompt enhancements are durable per-datasource/schema artifacts and should preserve user-authored context while regenerating DB-aware guidance from newer snapshots
 - prompt enhancements should support a distinct additional effective-prompt instruction field for direct system-prompt injection without overloading domain notes or answer-style guidance
 - prompt bundles and prompt enhancements should cache token budgets for the base prompt, effective prompt, and enhancement layers so prompt size is inspectable without recomputing it every run
+- cost monitoring should become a local durable usage ledger in addition to LangSmith tracing, with model/tool usage events, pricing metadata, budget summaries, and dashboard visibility
+- custom LLM support should move from a small provider switch into a model registry that records provider, model, context window, feature flags, reasoning mapping, pricing, and LangSmith metadata
+- custom notes should become typed, scoped, provenance-aware records with explicit prompt-injection policy rather than flat freeform strings
+- audit trails should record query, profile, prompt exploration, retrieval, model, tool, and memory events without creating new execution paths or weakening read-only defaults
 - token estimation should prefer `tiktoken` when available and fall back to a deterministic approximation when it is not
 - LangGraph long-term memory should persist canonical datasource/schema context in the store and inject it through the shared dynamic-prompt path, not through dashboard-only state
 - when long-term memory is enabled, snapshot-derived context should be able to auto-sync into the store and reuse the checkpoint Postgres database URL unless a separate store URL is configured
@@ -37,12 +41,14 @@ Stable repo memory should capture:
 - LangChain v1 should be used through our own strict tool surface and LangGraph checkpointers, not via the generic SQL toolkit as the primary execution path
 - local Postgres is the standard agent checkpoint target when persistence is enabled, but it should be treated as separate persistence infrastructure from inspected target databases
 - read-only engine policy is dialect-specific: SQLite uses `PRAGMA query_only`, Postgres sets `default_transaction_read_only`, and MSSQL should add ODBC `ApplicationIntent=ReadOnly` while still relying on the central SQL guard as the hard safety boundary
+- MSSQL support should get a real dialect package for SQL Server catalog enrichment, storage/index metadata, permission audit, and dialect-specific profile safeguards instead of scattering SQL Server conditionals through shared services
 - agent middleware should own dynamic prompting, state seeding, todo handling, tool-error shaping, HITL, and summarization policy
 - the dashboard Prompt tab is the current human-facing control surface for reviewing the base prompt, effective prompt, and saved prompt enhancement context
 - the dashboard chat surface should stream meaningful agent progress instead of blocking behind a single spinner, while keeping the same guarded read-only execution path
 - saved dashboard threads should support optional user-friendly names and remain reloadable through the shared thread registry
 - new datasource/schema contexts should offer a lightweight initial annotation path so prompt enhancement starts with human context instead of waiting for a later prompt-only workflow
 - the dashboard should expose explicit controls to regenerate schema-aware prompt context and to ensure or rebuild the retrieval index for the active stored snapshot
+- dashboard analytics should prefer native Streamlit dataframes and Plotly first; add `streamlit-aggrid` only if richer grid behavior is worth the extra dependency surface
 - the dashboard schema surface should always provide a server-rendered image fallback when Mermaid rendering is unavailable or inconsistent
 - dashboard observability should report the effective checkpoint backend and fallback reason, not just the requested settings value
 - `make dashboard-demo` should prefer durable Postgres checkpointing when local checkpoint configuration is available
